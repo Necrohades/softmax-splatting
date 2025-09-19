@@ -1,0 +1,3 @@
+INFO:__main__:Loading test data from /home/tonifuentes/Pictures/archive/vimeo_triplet/sequences
+INFO:__main__:Loading sequences from /home/tonifuentes/Pictures/archive/vimeo_triplet/tri_testlist.txt
+INFO:__main__:Number of sequences available: 3783
