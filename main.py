@@ -37,7 +37,7 @@ def preprocess(image: torch.Tensor) -> torch.Tensor:
 
 
 def to_image(image: torch.Tensor, index: int = 0) -> PIL.Image.Image:
-    array = image.clip(0.0, 1.0).permute(0, 2, 3, 1)[index].numpy(force=True) * 255.0
+    array = image.clip(0.0, 1.0).permute((0, 2, 3, 1))[index].numpy(force=True) * 255.0
     return PIL.Image.fromarray(array.astype(np.uint8))
 
 
@@ -64,34 +64,29 @@ def main():
 
     for _ in range(1):
         for i, (images, gt) in enumerate(train_loader, 1):
-            print(images[0].shape)
-            transforms = torchvision.transforms.ToTensor()
-            # images = [image.numpy().transpose(0, 3, 1, 2)[:, ::-1, :, :].astype(np.float32) for image in images]
-            # images = (transforms(image) for image in images)
-            images = Variable(torch.cat([image.view(batch_size, 3, inputHeight, inputWidth, -1) for image in images], dim=4)).cuda()
+            # images = Variable(torch.cat([image.view(batch_size, 3, inputHeight, inputWidth, -1) for image in images], dim=4)).cuda()
+            images = Variable(torch.cat([image.view(batch_size, 3, inputHeight, inputWidth, -1) for image in map(preprocess, images)], dim=4)).cuda()
             # gt = gt.numpy().transpose(0, 3, 1, 2)[:, ::-1, :, :]
             # gt = torch.from_numpy(gt.copy()).cuda()
             gt = preprocess(gt)
-            print(gt.shape)
 
             optimizer.zero_grad()
             output = netNetwork(images)
-            output = output.view(*output.shape[1:])
+            # output = output.view(*output.shape[1:])
 
             loss = loss_function(output, gt)
             loss.backward()
             optimizer.step()
 
-            if not i % 1:
+            verbosity = 1000
+            if not i % verbosity:
                 print(f"step: {i}, loss: {loss.item()}")
                 # PIL.Image.fromarray((output.clip(0.0, 1.0).numpy(force=True).transpose(1, 2, 0)[:, :, ::-1] * 255.0).astype(np.uint8)).save(f"film_out{i//100}.png")
                 # PIL.Image.fromarray((gt.clip(0.0, 1.0).view(*gt.shape[1:]).numpy(force=True).transpose(1, 2, 0)[:, :, ::-1] * 255.0).astype(np.uint8)).save(f"film_gt{i//100}.png")
                 # PIL.Image.fromarray((gt.clip(0.0, 1.0).view(*gt.shape[1:]).numpy(force=True) * 255.0).astype(np.uint8)).save(f"film_gt{i//100}.png")
-                to_image(output).save(f"film_out{i//100}.png")
-                to_image(gt).save(f"film_gt{i//100}.png")
-
+                to_image(output).save(f"film_out{i//verbosity}.png")
+                to_image(gt).save(f"film_gt{i//verbosity}.png")
 
 
 if __name__ == "__main__":
     main()
-
