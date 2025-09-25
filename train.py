@@ -1,5 +1,7 @@
 import argparse
 import datetime
+import logging
+import sys
 
 import more_itertools
 import numpy as np
@@ -42,31 +44,40 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument("-t", "--test", action="store_true")
     parser.add_argument("-s", "--state_dict", type=str, required=False, help="load state dict in folder location")
+    parser.add_argument("-c", "--chunk_size", type=int, default=100)
+    parser.add_argument("-V", "--validation_iterations", type=int, required=False)
     return parser.parse_args()
 
 
 def _validate(network: torch.nn.Module,
               validation_loader: torch.utils.data.DataLoader,
-              step: int,
+              validation_iterations: int = None,
               *,
-              progress_bar: bool = True) -> tuple[float, float]:
+              progress_bar: bool = True,
+              desc: str = None) -> tuple[float, float]:
     """
     Perform a simple validation loop over the validation data loader.
     :param network: Model to be evaluated.
     :param validation_loader: Validation data loader.
-    :param step: Number of the step to be evaluated.
+    :param validation_iterations: Number of total iterations. Defaults to the total length of the validation data loader.
     :param progress_bar: Whether to show a progress bar during the validation loop.
-    :return: A tuple containing the sum of the L1 losses and the sum of the MSE losses over all the validation data.
+    :param desc: Description label of the progress bar if it is set to true.
+    :return: A tuple containing the arithmetic mean of the L1 losses and the arithmetic mean of the MSE losses over all
+        the validation data.
     """
 
-    validation_iter = iter(validation_loader)
+    if validation_iterations is None:
+        validation_iterations = len(validation_loader)
+
+    validation_iter = zip(range(validation_iterations), validation_loader)
     if progress_bar:
-        validation_iter = tqdm.tqdm(validation_iter, desc=f"Chunk {step} validation", ascii=True, dynamic_ncols=True, leave=True)
+        validation_iter = tqdm.tqdm(validation_iter, total=validation_iterations, desc=desc,
+                                    ascii=True, dynamic_ncols=True, leave=True)
 
     validation_l1 = 0
     validation_mse = 0
 
-    for images, gt in validation_iter:
+    for _, (images, gt) in validation_iter:
         images = torch.autograd.Variable(
             torch.cat([image.view(*image.shape, -1) for image in map(preprocess, images)], dim=4)).cuda()
         gt = preprocess(gt).cuda()
@@ -74,7 +85,7 @@ def _validate(network: torch.nn.Module,
         validation_l1 += torch.nn.functional.l1_loss(output, gt).item()
         validation_mse += torch.nn.functional.mse_loss(output, gt).item()
 
-    return validation_l1, validation_mse
+    return validation_l1 / validation_iterations, validation_mse / validation_iterations
 
 
 def train(network: torch.nn.Module,
@@ -88,12 +99,16 @@ def train(network: torch.nn.Module,
           do_checkpoints: bool = True,
           checkpoint_dir: str = None,
           save_images: bool = True,
-          save_dir: str = None) -> None:
+          save_dir: str = None,
+          validation_iterations: int = None) -> None:
+
+    logger = logging.getLogger(__name__)
+    logger.info(f"Starting train iteration. Number of epochs: {epochs}; chunk size: {chunk_size}")
 
     train_data = dataset_triplet.Dataset(dataset_folder_path, split="train")
     validation_data = dataset_triplet.Dataset(dataset_folder_path, split="validation")
     train_loader = torch.utils.data.DataLoader(train_data, batch_size=batch_size, shuffle=True)
-    validation_loader = torch.utils.data.DataLoader(validation_data, batch_size=batch_size, shuffle=False)
+    validation_loader = torch.utils.data.DataLoader(validation_data, batch_size=batch_size, shuffle=True)
 
     loss_function = torch.nn.MSELoss()
     optimizer = torch.optim.Adam(network.parameters(), lr=learning_rate)
@@ -143,9 +158,12 @@ def train(network: torch.nn.Module,
                     to_image(gt).save(save_path / f"{i:03d}_gt.png")
 
                 # validate the model after each chunk
-                validation_l1, validation_mse = _validate(network, validation_loader, i, progress_bar=progress_bar)
-                summary_writer.add_scalar("Validation/MSE", validation_mse / len(validation_data), i)
-                summary_writer.add_scalar("Validation/L1", validation_l1 / len(validation_data), i)
+                logger.info(f"Starting validation loop for chunk {i} of epoch {n_epoch}")
+                validation_l1, validation_mse = _validate(network, validation_loader, validation_iterations,
+                                                          progress_bar=progress_bar, desc=f"Chunk {i} validation")
+                logger.info(f"c{i}e{n_epoch} validation results: MSE - {validation_mse}; L1 - {validation_l1}")
+                summary_writer.add_scalar("Validation/MSE", validation_mse, i)
+                summary_writer.add_scalar("Validation/L1", validation_l1, i)
 
 
 def test(network: torch.nn.Module,
@@ -175,6 +193,11 @@ def test(network: torch.nn.Module,
 
 def main():
     args = parse_args()
+
+    if args.verbose:
+        print("Verbose is set to true", file=sys.stderr)
+        logging.basicConfig(stream=sys.stderr, level=logging.INFO)
+
     net = softmax_basic.Model().cuda()
     if args.state_dict is not None:
         net.load_state_dict(torch.load(args.state_dict))
@@ -182,7 +205,7 @@ def main():
     if args.test:
         test(net, args.path, batch_size=args.batch_size)
     else:
-        train(net, args.path, batch_size=args.batch_size, chunk_size=100)
+        train(net, args.path, batch_size=args.batch_size, chunk_size=args.chunk_size, validation_iterations=args.validation_iterations)
 
 
 if __name__ == '__main__':
