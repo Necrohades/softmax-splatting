@@ -33,7 +33,7 @@ BACKWARD = 1
 
 ##########################################################
 
-# args_strModel = 'lf'
+args_strModel = 'lf'
 # args_strOne = './images/one.png'
 # args_strTwo = './images/two.png'
 # args_strVideo = './videos/car-turn.mp4'
@@ -568,7 +568,8 @@ class Model(torch.nn.Module):
 
         self.netSynthesis = Synthesis()
 
-        # self.load_state_dict({strKey.replace('module', 'net'): tenWeight for strKey, tenWeight in torch.hub.load_state_dict_from_url(url='http://content.sniklaus.com/softsplat/network-' + args_strModel + '.pytorch', file_name='softsplat-' + args_strModel).items()})
+        self.load_state_dict({strKey.replace('module', 'net'): tenWeight for strKey, tenWeight in torch.hub.load_state_dict_from_url(url='http://content.sniklaus.com/softsplat/network-' + args_strModel + '.pytorch', file_name='softsplat-' + args_strModel).items()})
+        self.netFlow = self.netFlow.eval()
     # end
 
 

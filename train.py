@@ -7,11 +7,14 @@ import more_itertools
 import numpy as np
 import pathlib
 import PIL.Image
+import rich.progress
 import torch
 import torch.nn
 import torch.autograd
 import torch.utils.tensorboard as tb
+import torcheval.metrics
 import tqdm
+from tensorflow.python.ops.gen_summary_ops import summary_writer
 
 import dataset_triplet
 import softmax_basic
@@ -44,8 +47,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument("-t", "--test", action="store_true")
     parser.add_argument("-s", "--state_dict", type=str, required=False, help="load state dict in folder location")
-    parser.add_argument("-c", "--chunk_size", type=int, default=100)
-    parser.add_argument("-V", "--validation_iterations", type=int, required=False)
+    parser.add_argument("-r", "--learning_rate", type=float, default=1e-4)
+    parser.add_argument("-C", "--checkpoint_period", type=int, default=1000)
+    parser.add_argument("-V", "--validation_period", type=int, default=100)
+    parser.add_argument("--validation_iterations", type=int, required=False, default=10)
+    parser.add_argument("-d", "--disable_generate_files", action="store_true", default=None)
     return parser.parse_args()
 
 
@@ -53,15 +59,13 @@ def _validate(network: torch.nn.Module,
               validation_loader: torch.utils.data.DataLoader,
               validation_iterations: int = None,
               *,
-              progress_bar: bool = True,
-              desc: str = None) -> tuple[float, float]:
+              description: str = None) -> tuple[float, float, float]:
     """
     Perform a simple validation loop over the validation data loader.
     :param network: Model to be evaluated.
     :param validation_loader: Validation data loader.
     :param validation_iterations: Number of total iterations. Defaults to the total length of the validation data loader.
-    :param progress_bar: Whether to show a progress bar during the validation loop.
-    :param desc: Description label of the progress bar if it is set to true.
+    :param description: Description label of the progress bar.
     :return: A tuple containing the arithmetic mean of the L1 losses and the arithmetic mean of the MSE losses over all
         the validation data.
     """
@@ -70,22 +74,27 @@ def _validate(network: torch.nn.Module,
         validation_iterations = len(validation_loader)
 
     validation_iter = zip(range(validation_iterations), validation_loader)
-    if progress_bar:
-        validation_iter = tqdm.tqdm(validation_iter, total=validation_iterations, desc=desc,
-                                    ascii=True, dynamic_ncols=True, leave=True)
 
     validation_l1 = 0
     validation_mse = 0
+    psnr = 0
 
-    for _, (images, gt) in validation_iter:
-        images = torch.autograd.Variable(
-            torch.cat([image.view(*image.shape, -1) for image in map(preprocess, images)], dim=4)).cuda()
-        gt = preprocess(gt).cuda()
-        output = network(images)
-        validation_l1 += torch.nn.functional.l1_loss(output, gt).item()
-        validation_mse += torch.nn.functional.mse_loss(output, gt).item()
+    with rich.progress.Progress() as progress:
+        validation_task = progress.add_task(description, total=validation_iterations)
+        for _, (images, gt) in validation_iter:
+            images = torch.autograd.Variable(
+                torch.cat([image.view(*image.shape, -1) for image in map(preprocess, images)], dim=4)).cuda()
+            gt = preprocess(gt).cuda()
+            output = network(images)
+            validation_l1 += torch.nn.functional.l1_loss(output, gt).item()
+            validation_mse += torch.nn.functional.mse_loss(output, gt).item()
+            metric = torcheval.metrics.PeakSignalNoiseRatio()
+            metric.update(gt, output)
+            psnr += metric.compute().item()
+            if progress is not None:
+                progress.update(validation_task, advance=1)
 
-    return validation_l1 / validation_iterations, validation_mse / validation_iterations
+    return psnr / validation_iterations, validation_l1 / validation_iterations, validation_mse / validation_iterations
 
 
 def train(network: torch.nn.Module,
@@ -93,17 +102,18 @@ def train(network: torch.nn.Module,
           *,
           batch_size: int = 1,
           epochs: int = 1,
-          chunk_size: int = 1000,
-          learning_rate: float = 1e-4,
-          progress_bar: bool = True,
-          do_checkpoints: bool = True,
+          initial_learning_rate: float = 1e-4,
+          final_learning_rate: float = 1e-7,
+          checkpoint_save_period: int = 1000,
           checkpoint_dir: str = None,
-          save_images: bool = True,
+          image_save_period: int = 1000,
           save_dir: str = None,
-          validation_iterations: int = None) -> None:
+          validation_period: int = 0,
+          validation_iterations: int = 10,
+          verbose: bool = False) -> None:
 
     logger = logging.getLogger(__name__)
-    logger.info(f"Starting train iteration. Number of epochs: {epochs}; chunk size: {chunk_size}")
+    logger.info(f"Starting train iteration. Number of epochs: {epochs}")
 
     train_data = dataset_triplet.Dataset(dataset_folder_path, split="train")
     validation_data = dataset_triplet.Dataset(dataset_folder_path, split="validation")
@@ -111,59 +121,96 @@ def train(network: torch.nn.Module,
     validation_loader = torch.utils.data.DataLoader(validation_data, batch_size=batch_size, shuffle=True)
 
     loss_function = torch.nn.MSELoss()
-    optimizer = torch.optim.Adam(network.parameters(), lr=learning_rate)
     iteration_number = 0  # counter for the number of training iterations so far
 
-    if do_checkpoints:
+    checkpoint_path: pathlib.Path | None = None
+    if checkpoint_save_period:
         if checkpoint_dir is None:
-            checkpoint_dir = "checkpoints/"
+            checkpoint_dir = f"checkpoints/{DATETIME_STR}"
+        pathlib.Path(checkpoint_dir).mkdir(parents=True, exist_ok=False)
         checkpoint_path = pathlib.Path(checkpoint_dir)
 
-    if save_images:
+    save_path: pathlib.Path | None = None
+    if image_save_period:
         if save_dir is None:
             save_dir = f"images/{DATETIME_STR}"  # default image save location
-        pathlib.Path(save_dir).mkdir(parents=True, exist_ok=True)  # create save directory if it doesn't exist
+        pathlib.Path(save_dir).mkdir(parents=True, exist_ok=False)  # create save directory if it doesn't exist
         save_path = pathlib.Path(save_dir)
 
-    with tb.SummaryWriter(log_dir="logs/fit/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")) as summary_writer:
+    summary_writer = tb.SummaryWriter(log_dir="logs/fit/" + DATETIME_STR)
+    progress = rich.progress.Progress()
+    summary_writer.__enter__()
+    progress.__enter__()
+
+    try:
         for n_epoch in range(epochs):
-            train_iter = iter(train_loader)
-            if progress_bar:  # decorate train data iterator with tqdm to show a progress bar
-                train_iter = tqdm.tqdm(train_iter, desc=f"Epoch {n_epoch+1}/{epochs}", ascii=True, dynamic_ncols=True, leave=True)
-            for i, chunk in enumerate(more_itertools.ichunked(train_iter, chunk_size)):
-                if progress_bar:
-                    chunk = tqdm.tqdm(chunk, total=chunk_size, ascii=True, dynamic_ncols=True, leave=True)
-                for images, gt in chunk:
-                    images = torch.autograd.Variable(torch.cat([image.view(*image.shape, -1) for image in map(preprocess, images)], dim=4)).cuda()
-                    gt = preprocess(gt).cuda()
+            lr = n_epoch / (epochs - 1) if epochs > 1 else 0
+            lr = initial_learning_rate * (1 - lr) + final_learning_rate * lr
+            progress.__exit__(None, None, None)
+            optimizer = torch.optim.Adam(network.parameters(), lr=lr)
+            logger.info(f"Epoch {n_epoch}. lr={lr}")
+            progress = rich.progress.Progress()
+            progress.__enter__()
+            epoch_task = progress.add_task(f"Epoch {n_epoch}/{epochs}", total=len(train_loader))
+            for n_batch, (images, gt) in enumerate(train_loader):
+                images = torch.autograd.Variable(torch.cat([image.view(*image.shape, -1) for image in map(preprocess, images)], dim=4)).cuda()
+                gt = preprocess(gt).cuda()
+                optimizer.zero_grad()
+                output = network(images)
+                loss = loss_function(output, gt)
+                loss.backward()
+                optimizer.step()
+                l1_loss = torch.nn.functional.l1_loss(output, gt)
 
-                    optimizer.zero_grad()
-                    output = network(images)
-                    loss = loss_function(output, gt)
-                    l1_loss = torch.nn.functional.l1_loss(output, gt)
-                    loss.backward()
-                    optimizer.step()
+                summary_writer.add_scalar("Train/MSE", loss.item(), iteration_number)
+                summary_writer.add_scalar("Train/L1", l1_loss.item(), iteration_number)
+                restore_progress = False
+                batch_str = f"e{n_epoch:03d}b{n_batch:05d}"
 
-                    summary_writer.add_scalar("Train/MSE", loss.item(), iteration_number)
-                    summary_writer.add_scalar("Train/L1", l1_loss.item()), iteration_number
-                    iteration_number += 1
-
-                # periodically save the model parameters
-                if do_checkpoints:
-                    torch.save(network.state_dict(), checkpoint_path / f"{DATETIME_STR}-{i:03d}")
+                # periodically save checkpoints
+                if checkpoint_save_period > 0 and not n_batch % checkpoint_save_period:
+                    if verbose and not restore_progress:  # close progress bar if printing logger info to stderr
+                        progress.__exit__(None, None, None)
+                        restore_progress = True
+                    logger.info(f"saving checkpoint {checkpoint_path / batch_str}...")
+                    torch.save(network.state_dict(), checkpoint_path / batch_str)
 
                 # periodically save generated images
-                if save_images:
-                    to_image(output).save(save_path / f"{i:03d}_out.png")
-                    to_image(gt).save(save_path / f"{i:03d}_gt.png")
+                if image_save_period > 0 and not n_batch % image_save_period:
+                    if verbose and not restore_progress:  # close progress bar if printing logger info to stderr
+                        progress.__exit__(None, None, None)
+                        restore_progress = True
+                    logger.info(f"saving image {save_path / f"e{batch_str}_out.png"}...")
+                    to_image(output).save(save_path / f"e{batch_str}_out.png")
+                    logger.info(f"saving image {save_path / f"e{batch_str}_gt.png"}...")
+                    to_image(gt).save(save_path / f"e{batch_str}_gt.png")
 
-                # validate the model after each chunk
-                logger.info(f"Starting validation loop for chunk {i} of epoch {n_epoch}")
-                validation_l1, validation_mse = _validate(network, validation_loader, validation_iterations,
-                                                          progress_bar=progress_bar, desc=f"Chunk {i} validation")
-                logger.info(f"c{i}e{n_epoch} validation results: MSE - {validation_mse}; L1 - {validation_l1}")
-                summary_writer.add_scalar("Validation/MSE", validation_mse, i)
-                summary_writer.add_scalar("Validation/L1", validation_l1, i)
+                if validation_period > 0 and iteration_number and not n_batch % validation_period:
+                    if verbose and not restore_progress:
+                        progress.__exit__(None, None, None)
+                        restore_progress = True
+                    psnr, validation_l1, validation_mse = _validate(network, validation_loader, validation_iterations, description=f"Batch {batch_str} validation")
+                    logger.info(f"{batch_str} validation results: PSNR - {psnr}, MSE - {validation_mse}; L1 - {validation_l1}")
+                    summary_writer.add_scalar("Validation/PSNR", psnr, iteration_number)
+                    summary_writer.add_scalar("Validation/MSE", validation_mse, iteration_number)
+                    summary_writer.add_scalar("Validation/L1", validation_l1, iteration_number)
+
+                if restore_progress:
+                    progress = rich.progress.Progress()
+                    progress.__enter__()
+                    epoch_task = progress.add_task(f"Epoch {n_epoch}/{epochs}", total=len(train_loader), completed=n_batch)
+
+                iteration_number += 1
+                progress.update(epoch_task, advance=1)
+                progress.refresh()
+
+    except Exception as e:
+        summary_writer.__exit__(type(e), e, e.__traceback__)
+        progress.__exit__(type(e), e, e.__traceback__)
+        raise e
+    else:
+        summary_writer.__exit__(None, None, None)
+        progress.__exit__(None, None, None)
 
 
 def test(network: torch.nn.Module,
@@ -195,7 +242,7 @@ def main():
     args = parse_args()
 
     if args.verbose:
-        print("Verbose is set to true", file=sys.stderr)
+        print("Verbose is set to true", file=sys.stdout)
         logging.basicConfig(stream=sys.stderr, level=logging.INFO)
 
     net = softmax_basic.Model().cuda()
@@ -205,7 +252,15 @@ def main():
     if args.test:
         test(net, args.path, batch_size=args.batch_size)
     else:
-        train(net, args.path, batch_size=args.batch_size, chunk_size=args.chunk_size, validation_iterations=args.validation_iterations)
+        train(
+            net, args.path,
+            epochs=args.epochs,
+            batch_size=args.batch_size,
+            checkpoint_save_period=args.checkpoint_period,
+            validation_period=args.validation_period,
+            validation_iterations=args.validation_iterations,
+            verbose=args.verbose
+        )
 
 
 if __name__ == '__main__':
