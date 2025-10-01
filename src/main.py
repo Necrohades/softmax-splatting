@@ -3,11 +3,7 @@ import softmax_basic
 
 import torch
 import torch.nn
-import torchvision.transforms
 from torch.autograd import Variable
-
-import logging
-import sys
 
 
 class AffineFlow(torch.nn.Module):

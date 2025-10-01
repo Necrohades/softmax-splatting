@@ -1,85 +1,85 @@
 #!/usr/bin/env python
 
-import getopt
-import math
-import numpy
-import PIL
-import PIL.Image
-import sys
+# import getopt
+# import math
+# import numpy
+# import PIL
+# import PIL.Image
+# import sys
+# import typing
 import torch
-import typing
+
+import sys
+
+# import external.splatting.softsplat as softsplat # the custom softmax splatting layer
+# from external.splatting.correlation import correlation
 
 import softsplat # the custom softmax splatting layer
 
 try:
     from .correlation import correlation # the custom cost volume layer
 except:
-    sys.path.insert(0, './correlation'); import correlation # you should consider upgrading python
+    sys.path.insert(0, 'correlation'); import correlation # you should consider upgrading python
 # end
+
+FORWARD = 0
+BACKWARD = 1
 
 ##########################################################
 
-torch.set_grad_enabled(False) # make sure to not compute gradients for computational performance
+# torch.set_grad_enabled(False) # make sure to not compute gradients for computational performance
 
-torch.backends.cudnn.enabled = True # make sure to use cudnn for computational performance
+# torch.backends.cudnn.enabled = True # make sure to use cudnn for computational performance
 
 ##########################################################
 
 args_strModel = 'lf'
-args_strOne = './images/one.png'
-args_strTwo = './images/two.png'
-args_strVideo = './videos/car-turn.mp4'
-args_strOut = './out.png'
+# args_strOne = './images/one.png'
+# args_strTwo = './images/two.png'
+# args_strVideo = './videos/car-turn.mp4'
+# args_strOut = './out.png'
 
-for strOption, strArg in getopt.getopt(sys.argv[1:], '', [
-    'model=',
-    'one=',
-    'two=',
-    'video=',
-    'out=',
-])[0]:
-    if strOption == '--model' and strArg != '': args_strModel = strArg # which model to use
-    if strOption == '--one' and strArg != '': args_strOne = strArg # path to the first frame
-    if strOption == '--two' and strArg != '': args_strTwo = strArg # path to the second frame
-    if strOption == '--video' and strArg != '': args_strVideo = strArg # path to a video
-    if strOption == '--out' and strArg != '': args_strOut = strArg # path to where the output should be stored
-# end
-
-##########################################################
-
-def read_flo(strFile):
-    with open(strFile, 'rb') as objFile:
-        strFlow = objFile.read()
-    # end
-
-    assert(numpy.frombuffer(buffer=strFlow, dtype=numpy.float32, count=1, offset=0) == 202021.25)
-
-    intWidth = numpy.frombuffer(buffer=strFlow, dtype=numpy.int32, count=1, offset=4)[0]
-    intHeight = numpy.frombuffer(buffer=strFlow, dtype=numpy.int32, count=1, offset=8)[0]
-
-    return numpy.frombuffer(buffer=strFlow, dtype=numpy.float32, count=intHeight * intWidth * 2, offset=12).reshape(intHeight, intWidth, 2)
-# end
+# for strOption, strArg in getopt.getopt(sys.argv[1:], '', [
+#     'model=',
+#     'one=',
+#     'two=',
+#     'video=',
+#     'out=',
+# ])[0]:
+#     if strOption == '--model' and strArg != '': args_strModel = strArg # which model to use
+#     if strOption == '--one' and strArg != '': args_strOne = strArg # path to the first frame
+#     if strOption == '--two' and strArg != '': args_strTwo = strArg # path to the second frame
+#     if strOption == '--video' and strArg != '': args_strVideo = strArg # path to a video
+#     if strOption == '--out' and strArg != '': args_strOut = strArg # path to where the output should be stored
+# # end
 
 ##########################################################
 
-backwarp_tenGrid = {}
+# def read_flo(strFile):
+#     with open(strFile, 'rb') as objFile:
+#         strFlow = objFile.read()
+#     # end
 
-def backwarp(tenIn, tenFlow):
-    if str(tenFlow.shape) not in backwarp_tenGrid:
-        tenHor = torch.linspace(start=-1.0, end=1.0, steps=tenFlow.shape[3], dtype=tenFlow.dtype, device=tenFlow.device).view(1, 1, 1, -1).repeat(1, 1, tenFlow.shape[2], 1)
-        tenVer = torch.linspace(start=-1.0, end=1.0, steps=tenFlow.shape[2], dtype=tenFlow.dtype, device=tenFlow.device).view(1, 1, -1, 1).repeat(1, 1, 1, tenFlow.shape[3])
+#     assert(numpy.frombuffer(buffer=strFlow, dtype=numpy.float32, count=1, offset=0) == 202021.25)
 
-        backwarp_tenGrid[str(tenFlow.shape)] = torch.cat([tenHor, tenVer], 1).cuda()
-    # end
+#     intWidth = numpy.frombuffer(buffer=strFlow, dtype=numpy.int32, count=1, offset=4)[0]
+#     intHeight = numpy.frombuffer(buffer=strFlow, dtype=numpy.int32, count=1, offset=8)[0]
 
-    tenFlow = torch.cat([tenFlow[:, 0:1, :, :] / ((tenIn.shape[3] - 1.0) / 2.0), tenFlow[:, 1:2, :, :] / ((tenIn.shape[2] - 1.0) / 2.0)], 1)
+#     return numpy.frombuffer(buffer=strFlow, dtype=numpy.float32, count=intHeight * intWidth * 2, offset=12).reshape(intHeight, intWidth, 2)
+# # end
 
-    return torch.nn.functional.grid_sample(input=tenIn, grid=(backwarp_tenGrid[str(tenFlow.shape)] + tenFlow).permute(0, 2, 3, 1), mode='bilinear', padding_mode='zeros', align_corners=True)
+##########################################################
+
+
 # end
 
 ##########################################################
 
 class Flow(torch.nn.Module):
+    
+    # Static variable to cache the backwarp grid for performance
+    backwarp_tenGrid = {}
+    
     def __init__(self):
         super().__init__()
 
@@ -173,17 +173,15 @@ class Flow(torch.nn.Module):
                     tenMain = torch.cat([tenOne, tenVolume], 1)
 
                 elif objPrevious is not None:
-                    tenForward = torch.nn.functional.interpolate(input=objPrevious['tenForward'], size=(intHeight, intWidth), mode='bilinear', align_corners=False) / float(objPrevious['tenForward'].shape[3]) * float(intWidth)
+                    tenForward = torch.nn.functional.interpolate(input=objPrevious, size=(intHeight, intWidth), mode='bilinear', align_corners=False) / float(objPrevious.shape[3]) * float(intWidth)
 
-                    tenVolume = correlation.FunctionCorrelation(tenOne=tenOne, tenTwo=backwarp(tenTwo, tenForward))
+                    tenVolume = correlation.FunctionCorrelation(tenOne=tenOne, tenTwo=Flow._Flow__backwarp(tenTwo, tenForward))
 
                     tenMain = torch.cat([tenOne, tenVolume, tenForward], 1)
 
                 # end
 
-                return {
-                    'tenForward': self.netMain(tenMain)
-                }
+                return self.netMain(tenMain)
             # end
         # end
 
@@ -196,6 +194,20 @@ class Flow(torch.nn.Module):
         self.netFifth = Decoder(128 + 81 + 2)
         self.netSixth = Decoder(192 + 81)
     # end
+    
+    @staticmethod
+    def __backwarp(tenIn, tenFlow):
+        if str(tenFlow.shape) not in Flow.backwarp_tenGrid:
+            tenHor = torch.linspace(start=-1.0, end=1.0, steps=tenFlow.shape[3], dtype=tenFlow.dtype, device=tenFlow.device).view(1, 1, 1, -1).repeat(1, 1, tenFlow.shape[2], 1)
+            tenVer = torch.linspace(start=-1.0, end=1.0, steps=tenFlow.shape[2], dtype=tenFlow.dtype, device=tenFlow.device).view(1, 1, -1, 1).repeat(1, 1, 1, tenFlow.shape[3])
+
+            Flow.backwarp_tenGrid[str(tenFlow.shape)] = torch.cat([tenHor, tenVer], 1).cuda()
+        # end
+
+        tenFlow = torch.cat([tenFlow[:, 0:1, :, :] / ((tenIn.shape[3] - 1.0) / 2.0), tenFlow[:, 1:2, :, :] / ((tenIn.shape[2] - 1.0) / 2.0)], 1)
+
+        return torch.nn.functional.grid_sample(input=tenIn, grid=(Flow.backwarp_tenGrid[str(tenFlow.shape)] + tenFlow).permute(0, 2, 3, 1), mode='bilinear', padding_mode='zeros', align_corners=True)
+    
 
     def forward(self, tenOne, tenTwo):
         intWidth = tenOne.shape[3] and tenTwo.shape[3]
@@ -225,10 +237,11 @@ class Flow(torch.nn.Module):
         objForward = self.netFirst(tenOne[-6], tenTwo[-6], objForward)
         objBackward = self.netFirst(tenTwo[-6], tenOne[-6], objBackward)
 
-        return {
-            'tenForward': torch.nn.functional.interpolate(input=objForward['tenForward'], size=(intHeight, intWidth), mode='bilinear', align_corners=False) * (float(intWidth) / float(objForward['tenForward'].shape[3])),
-            'tenBackward': torch.nn.functional.interpolate(input=objBackward['tenForward'], size=(intHeight, intWidth), mode='bilinear', align_corners=False) * (float(intWidth) / float(objBackward['tenForward'].shape[3]))
-        }
+
+        tenForward = torch.nn.functional.interpolate(input=objForward, size=(intHeight, intWidth), mode='bilinear', align_corners=False) * (float(intWidth) / float(objForward.shape[3]))
+        tenBackward = torch.nn.functional.interpolate(input=objBackward, size=(intHeight, intWidth), mode='bilinear', align_corners=False) * (float(intWidth) / float(objBackward.shape[3]))
+
+        return tenForward, tenBackward
     # end
 # end
 
@@ -388,7 +401,7 @@ class Synthesis(torch.nn.Module):
             def forward(self, tenEncone, tenEnctwo, tenFlow):
                 tenColumn = [None, None, None, None]
 
-                tenColumn[0] = torch.cat([self.netInput(tenEncone[0][:, 0:3, :, :]), self.netError(torch.nn.functional.l1_loss(input=tenEncone[0], target=backwarp(tenEnctwo[0], tenFlow), reduction='none').mean([1], True))], 1)
+                tenColumn[0] = torch.cat([self.netInput(tenEncone[0][:, 0:3, :, :]), self.netError(torch.nn.functional.l1_loss(input=tenEncone[0], target=Flow._Flow__backwarp(tenEnctwo[0], tenFlow), reduction='none').mean([1], True))], 1)
                 tenColumn[1] = self._modules['0x0 - 1x0'](tenColumn[0])
                 tenColumn[2] = self._modules['1x0 - 2x0'](tenColumn[1])
                 tenColumn[3] = self._modules['2x0 - 3x0'](tenColumn[2])
@@ -419,12 +432,8 @@ class Synthesis(torch.nn.Module):
                 self.netThr = Basic('conv-relu-conv', [0 + 0 + 96 + 96 + 1 + 1, 96, 96], True)
             # end
 
-            def forward(self, tenEncone: list[torch.Tensor], tenEnctwo: list[torch.Tensor], tenMetricone: torch.Tensor, tenMetrictwo: torch.Tensor, tenForward, tenBackward):
-                tenWarpedOne: list[torch.Tensor] = []
-                tenWarpedTwo: list[torch.Tensor] = []
-                tenOutput: list[torch.Tensor] = []
-                tenOutOne: list[torch.Tensor] = []
-                tenOutTwo: list[torch.Tensor] = []
+            def forward(self, tenEncone, tenEnctwo, tenMetricone, tenMetrictwo, tenForward, tenBackward):
+                tenOutput = []
 
                 for intLevel in range(3):
                     if intLevel != 0:
@@ -435,21 +444,13 @@ class Synthesis(torch.nn.Module):
                         tenBackward = torch.nn.functional.interpolate(input=tenBackward, size=(tenEnctwo[intLevel].shape[2], tenEnctwo[intLevel].shape[3]), mode='bilinear', align_corners=False) * (float(tenEnctwo[intLevel].shape[3]) / float(tenBackward.shape[3]))
                     # end
 
-                    tenWarpedOne.append(softsplat.softsplat(tenIn=torch.cat([tenEncone[intLevel], tenMetricone], 1), tenFlow=tenForward, tenMetric=tenMetricone.neg().clip(-20.0, 20.0), strMode='soft'))
-                    tenWarpedTwo.append(softsplat.softsplat(tenIn=torch.cat([tenEnctwo[intLevel], tenMetrictwo], 1), tenFlow=tenBackward, tenMetric=tenMetrictwo.neg().clip(-20.0, 20.0), strMode='soft'))
-
-                    tenOutput.append([self.netOne, self.netTwo, self.netThr][intLevel](torch.cat([tenWarpedOne[-1], tenWarpedTwo[-1]], 1)))
-                    tenOutOne.append([self.netOne, self.netTwo, self.netThr][intLevel](torch.cat([tenWarpedOne[-1], tenWarpedOne[-1]], 1)))
-                    tenOutTwo.append([self.netOne, self.netTwo, self.netThr][intLevel](torch.cat([tenWarpedOne[-1], tenWarpedTwo[-1]], 1)))
+                    tenOutput.append([self.netOne, self.netTwo, self.netThr][intLevel](torch.cat([
+                        softsplat.softsplat(tenIn=torch.cat([tenEncone[intLevel], tenMetricone], 1), tenFlow=tenForward, tenMetric=tenMetricone.neg().clip(-20.0, 20.0), strMode='soft'),
+                        softsplat.softsplat(tenIn=torch.cat([tenEnctwo[intLevel], tenMetrictwo], 1), tenFlow=tenBackward, tenMetric=tenMetrictwo.neg().clip(-20.0, 20.0), strMode='soft')
+                    ], 1)))
                 # end
 
-                print("tenOutput:", [t.shape for t in tenOutput])
-                print("w1:", [t.shape for t in tenWarpedOne])
-                print("w2:", [t.shape for t in tenWarpedTwo])
-                print("o1:", [t.shape for t in tenOutOne])
-                print("o2:", [t.shape for t in tenOutTwo])
-
-                return tenOutput, tenOutOne, tenOutTwo
+                return tenOutput
             # end
         # end
 
@@ -459,7 +460,7 @@ class Synthesis(torch.nn.Module):
 
         self.netWarp = Warp()
 
-        for intRow, intFeatures in enumerate([32, 64, 96]): #[(0, 32), (1, 64), (2, 96)]:
+        for intRow, intFeatures in [(0, 32), (1, 64), (2, 96)]:
             self.add_module(str(intRow) + 'x0' + ' - ' + str(intRow) + 'x1', Basic('relu-conv-relu-conv', [intFeatures, intFeatures, intFeatures], True))
             self.add_module(str(intRow) + 'x1' + ' - ' + str(intRow) + 'x2', Basic('relu-conv-relu-conv', [intFeatures, intFeatures, intFeatures], True))
             self.add_module(str(intRow) + 'x2' + ' - ' + str(intRow) + 'x3', Basic('relu-conv-relu-conv', [intFeatures, intFeatures, intFeatures], True))
@@ -490,60 +491,66 @@ class Synthesis(torch.nn.Module):
         tenForward = tenForward * fltTime
         tenBackward = tenBackward * (1.0 - fltTime)
 
-        tenWarp, _, _ = map(self.get_output, self.netWarp(tenEncone, tenEnctwo, tenMetricone, tenMetrictwo, tenForward, tenBackward))
+        tenWarp = self.netWarp(tenEncone, tenEnctwo, tenMetricone, tenMetrictwo, tenForward, tenBackward)
 
-        method = "soft"
-        if method == "sum":
-            tenWarp1 = softsplat.softsplat(tenOne, tenForward, None, method)
-            tenWarp2 = softsplat.softsplat(tenTwo, tenBackward, None, method)
-        else:
-            tenWarp1 = softsplat.softsplat(tenOne, tenForward, tenMetricone.neg().clip(-20, 20.0), method)
-            tenWarp2 = softsplat.softsplat(tenTwo, tenBackward, tenMetrictwo.neg().clip(-20, 20.0), method)
-        
-        tenWarp3 = (tenWarp1 + tenWarp2) / 2
-        
-        tenWarp1 = (tenWarp1 + 1) / 4
-        tenWarp2 = (tenWarp2 + 1) / 4
-        tenWarp3 = (tenWarp3 + 1) / 4
-
-        i = args_strOut.rindex('.')
-        out1 = args_strOut[:i] + "w1" + args_strOut[i:]
-        out2 = args_strOut[:i] + "w2" + args_strOut[i:]
-        out3 = args_strOut[:i] + "avg" + args_strOut[i:]
-
-        PIL.Image.fromarray((tenWarp1[0, :, :, :].cpu().clip(0.0, 1.0).numpy(force=True).transpose(1, 2, 0)[:, :, ::-1] * 255.0).astype(numpy.uint8)).save(out1)
-        PIL.Image.fromarray((tenWarp2[0, :, :, :].cpu().clip(0.0, 1.0).numpy(force=True).transpose(1, 2, 0)[:, :, ::-1] * 255.0).astype(numpy.uint8)).save(out2)
-        PIL.Image.fromarray((tenWarp3[0, :, :, :].cpu().clip(0.0, 1.0).numpy(force=True).transpose(1, 2, 0)[:, :, ::-1] * 255.0).astype(numpy.uint8)).save(out3)
-
-        return tenWarp
-
-    def get_output(self, tenWarp):
         tenColumn = [None, None, None]
 
         tenColumn[0] = tenWarp[0]
         tenColumn[1] = tenWarp[1] + self._modules['0x0 - 1x0'](tenColumn[0])
         tenColumn[2] = tenWarp[2] + self._modules['1x0 - 2x0'](tenColumn[1])
 
-        for intColumn in range(1, 3):
-            for intRow in range(len(tenColumn)):
-                tenColumn[intRow] = self._modules[str(intRow) + 'x' + str(intColumn - 1) + ' - ' + str(intRow) + 'x' + str(intColumn)](tenColumn[intRow])
-                if intRow != 0:
-                    tenColumn[intRow] = tenColumn[intRow] + self._modules[str(intRow - 1) + 'x' + str(intColumn) + ' - ' + str(intRow) + 'x' + str(intColumn)](tenColumn[intRow - 1])
-                # end
+        intColumn = 1
+        for intRow in range(len(tenColumn)):
+            tenColumn[intRow] = self._modules[str(intRow) + 'x' + str(intColumn - 1) + ' - ' + str(intRow) + 'x' + str(intColumn)](tenColumn[intRow])
+            if intRow != 0:
+                tenColumn[intRow] = tenColumn[intRow] + self._modules[str(intRow - 1) + 'x' + str(intColumn) + ' - ' + str(intRow) + 'x' + str(intColumn)](tenColumn[intRow - 1])
             # end
         # end
 
-        for intColumn in range(3, 6):
-            for intRow in range(len(tenColumn) -1, -1, -1):
-                tenColumn[intRow] = self._modules[str(intRow) + 'x' + str(intColumn - 1) + ' - ' + str(intRow) + 'x' + str(intColumn)](tenColumn[intRow])
-                if intRow != len(tenColumn) - 1:
-                    tenUp = self._modules[str(intRow + 1) + 'x' + str(intColumn) + ' - ' + str(intRow) + 'x' + str(intColumn)](tenColumn[intRow + 1])
+        intColumn = 2
+        for intRow in range(len(tenColumn)):
+            tenColumn[intRow] = self._modules[str(intRow) + 'x' + str(intColumn - 1) + ' - ' + str(intRow) + 'x' + str(intColumn)](tenColumn[intRow])
+            if intRow != 0:
+                tenColumn[intRow] = tenColumn[intRow] + self._modules[str(intRow - 1) + 'x' + str(intColumn) + ' - ' + str(intRow) + 'x' + str(intColumn)](tenColumn[intRow - 1])
+            # end
+        # end
 
-                    if tenUp.shape[2] != tenColumn[intRow].shape[2]: tenUp = torch.nn.functional.pad(input=tenUp, pad=[0, 0, 0, -1], mode='constant', value=0.0)
-                    if tenUp.shape[3] != tenColumn[intRow].shape[3]: tenUp = torch.nn.functional.pad(input=tenUp, pad=[0, -1, 0, 0], mode='constant', value=0.0)
+        intColumn = 3
+        for intRow in range(len(tenColumn) -1, -1, -1):
+            tenColumn[intRow] = self._modules[str(intRow) + 'x' + str(intColumn - 1) + ' - ' + str(intRow) + 'x' + str(intColumn)](tenColumn[intRow])
+            if intRow != len(tenColumn) - 1:
+                tenUp = self._modules[str(intRow + 1) + 'x' + str(intColumn) + ' - ' + str(intRow) + 'x' + str(intColumn)](tenColumn[intRow + 1])
 
-                    tenColumn[intRow] = tenColumn[intRow] + tenUp
-                # end
+                if tenUp.shape[2] != tenColumn[intRow].shape[2]: tenUp = torch.nn.functional.pad(input=tenUp, pad=[0, 0, 0, -1], mode='constant', value=0.0)
+                if tenUp.shape[3] != tenColumn[intRow].shape[3]: tenUp = torch.nn.functional.pad(input=tenUp, pad=[0, -1, 0, 0], mode='constant', value=0.0)
+
+                tenColumn[intRow] = tenColumn[intRow] + tenUp
+            # end
+        # end
+
+        intColumn = 4
+        for intRow in range(len(tenColumn) -1, -1, -1):
+            tenColumn[intRow] = self._modules[str(intRow) + 'x' + str(intColumn - 1) + ' - ' + str(intRow) + 'x' + str(intColumn)](tenColumn[intRow])
+            if intRow != len(tenColumn) - 1:
+                tenUp = self._modules[str(intRow + 1) + 'x' + str(intColumn) + ' - ' + str(intRow) + 'x' + str(intColumn)](tenColumn[intRow + 1])
+
+                if tenUp.shape[2] != tenColumn[intRow].shape[2]: tenUp = torch.nn.functional.pad(input=tenUp, pad=[0, 0, 0, -1], mode='constant', value=0.0)
+                if tenUp.shape[3] != tenColumn[intRow].shape[3]: tenUp = torch.nn.functional.pad(input=tenUp, pad=[0, -1, 0, 0], mode='constant', value=0.0)
+
+                tenColumn[intRow] = tenColumn[intRow] + tenUp
+            # end
+        # end
+
+        intColumn = 5
+        for intRow in range(len(tenColumn) -1, -1, -1):
+            tenColumn[intRow] = self._modules[str(intRow) + 'x' + str(intColumn - 1) + ' - ' + str(intRow) + 'x' + str(intColumn)](tenColumn[intRow])
+            if intRow != len(tenColumn) - 1:
+                tenUp = self._modules[str(intRow + 1) + 'x' + str(intColumn) + ' - ' + str(intRow) + 'x' + str(intColumn)](tenColumn[intRow + 1])
+
+                if tenUp.shape[2] != tenColumn[intRow].shape[2]: tenUp = torch.nn.functional.pad(input=tenUp, pad=[0, 0, 0, -1], mode='constant', value=0.0)
+                if tenUp.shape[3] != tenColumn[intRow].shape[3]: tenUp = torch.nn.functional.pad(input=tenUp, pad=[0, -1, 0, 0], mode='constant', value=0.0)
+
+                tenColumn[intRow] = tenColumn[intRow] + tenUp
             # end
         # end
 
@@ -553,7 +560,7 @@ class Synthesis(torch.nn.Module):
 
 ##########################################################
 
-class Network(torch.nn.Module):
+class Model(torch.nn.Module):
     def __init__(self):
         super().__init__()
 
@@ -562,20 +569,32 @@ class Network(torch.nn.Module):
         self.netSynthesis = Synthesis()
 
         self.load_state_dict({strKey.replace('module', 'net'): tenWeight for strKey, tenWeight in torch.hub.load_state_dict_from_url(url='http://content.sniklaus.com/softsplat/network-' + args_strModel + '.pytorch', file_name='softsplat-' + args_strModel).items()})
+        self.netFlow = self.netFlow.eval()
     # end
 
-    def forward(self, tenOne, tenTwo, fltTimes):
+
+    def forward(self, x, fltTime=0.5):
+        return self._multiple_forward(x, [fltTime])[0]
+
+    def _multiple_forward(self, x, fltTimes=[0.5]):
+        
+        tenOne = x[:, :, :, :, 0]
+        tenTwo = x[:, :, :, :, 1]
+        
         with torch.set_grad_enabled(False):
             tenStats = [tenOne, tenTwo]
-            tenMean = sum([tenIn.mean([1, 2, 3], True) for tenIn in tenStats]) / len(tenStats)
+            tenMean = sum([tenIn.mean([1, 2, 3], keepdim=True) for tenIn in tenStats]) / len(tenStats)
             tenStd = (sum([tenIn.std([1, 2, 3], False, True).square() + (tenMean - tenIn.mean([1, 2, 3], True)).square() for tenIn in tenStats]) / len(tenStats)).sqrt()
             tenOne = ((tenOne - tenMean) / (tenStd + 0.0000001)).detach()
             tenTwo = ((tenTwo - tenMean) / (tenStd + 0.0000001)).detach()
-        # end
+            # end
 
-        objFlow = self.netFlow(tenOne, tenTwo)
+            # tenOne = tenOne.view(*tenOne.shape[:-1])
+            # tenTwo = tenTwo.view(*tenTwo.shape[:-1])
 
-        tenImages = [self.netSynthesis(tenOne, tenTwo, objFlow['tenForward'], objFlow['tenBackward'], fltTime) for fltTime in fltTimes]
+            objFlow = self.netFlow(tenOne, tenTwo)
+
+        tenImages = [self.netSynthesis(tenOne, tenTwo, objFlow[FORWARD], objFlow[BACKWARD], fltTime) for fltTime in fltTimes]
 
         return [(tenImage * tenStd) + tenMean for tenImage in tenImages]
     # end
@@ -585,68 +604,68 @@ netNetwork = None
 
 ##########################################################
 
-def estimate(tenOne, tenTwo, fltTimes):
-    global netNetwork
+# def estimate(tenOne, tenTwo, fltTimes):
+#     global netNetwork
 
-    if netNetwork is None:
-        netNetwork = Network().cuda().train(False)
-    # end
+#     if netNetwork is None:
+#         netNetwork = Model().cuda().train(False)
+#     # end
 
-    assert(tenOne.shape[1] == tenTwo.shape[1])
-    assert(tenOne.shape[2] == tenTwo.shape[2])
+#     assert(tenOne.shape[1] == tenTwo.shape[1])
+#     assert(tenOne.shape[2] == tenTwo.shape[2])
 
-    intWidth = tenOne.shape[2]
-    intHeight = tenOne.shape[1]
+#     intWidth = tenOne.shape[2]
+#     intHeight = tenOne.shape[1]
 
-    tenPreprocessedOne = tenOne.cuda().view(1, 3, intHeight, intWidth)
-    tenPreprocessedTwo = tenTwo.cuda().view(1, 3, intHeight, intWidth)
+#     tenPreprocessedOne = tenOne.cuda().view(1, 3, intHeight, intWidth)
+#     tenPreprocessedTwo = tenTwo.cuda().view(1, 3, intHeight, intWidth)
 
-    intPadr = (2 - (intWidth % 2)) % 2
-    intPadb = (2 - (intHeight % 2)) % 2
+#     intPadr = (2 - (intWidth % 2)) % 2
+#     intPadb = (2 - (intHeight % 2)) % 2
 
-    tenPreprocessedOne = torch.nn.functional.pad(input=tenPreprocessedOne, pad=[0, intPadr, 0, intPadb], mode='replicate')
-    tenPreprocessedTwo = torch.nn.functional.pad(input=tenPreprocessedTwo, pad=[0, intPadr, 0, intPadb], mode='replicate')
+#     tenPreprocessedOne = torch.nn.functional.pad(input=tenPreprocessedOne, pad=[0, intPadr, 0, intPadb], mode='replicate')
+#     tenPreprocessedTwo = torch.nn.functional.pad(input=tenPreprocessedTwo, pad=[0, intPadr, 0, intPadb], mode='replicate')
 
-    return [tenImage[0, :, :intHeight, :intWidth].cpu() for tenImage in netNetwork(tenPreprocessedOne, tenPreprocessedTwo, fltTimes)]
-# end
+#     return [tenImage[0, :, :intHeight, :intWidth].cpu() for tenImage in netNetwork(tenPreprocessedOne, tenPreprocessedTwo, fltTimes)]
+# # end
 
 ##########################################################
 
-if __name__ == '__main__':
-    if args_strOut.split('.')[-1] in ['bmp', 'jpg', 'jpeg', 'png']:
-        tenOne = torch.FloatTensor(numpy.ascontiguousarray(numpy.array(PIL.Image.open(args_strOne))[:, :, ::-1].transpose(2, 0, 1).astype(numpy.float32) * (1.0 / 255.0)))
-        tenTwo = torch.FloatTensor(numpy.ascontiguousarray(numpy.array(PIL.Image.open(args_strTwo))[:, :, ::-1].transpose(2, 0, 1).astype(numpy.float32) * (1.0 / 255.0)))
+# if __name__ == '__main__':
+#     if args_strOut.split('.')[-1] in ['bmp', 'jpg', 'jpeg', 'png']:
+#         tenOne = torch.FloatTensor(numpy.ascontiguousarray(numpy.array(PIL.Image.open(args_strOne))[:, :, ::-1].transpose(2, 0, 1).astype(numpy.float32) * (1.0 / 255.0)))
+#         tenTwo = torch.FloatTensor(numpy.ascontiguousarray(numpy.array(PIL.Image.open(args_strTwo))[:, :, ::-1].transpose(2, 0, 1).astype(numpy.float32) * (1.0 / 255.0)))
 
-        tenOutput = estimate(tenOne, tenTwo, [0.5])[0]
+#         tenOutput = estimate(tenOne, tenTwo, [0.5])[0]
 
-        PIL.Image.fromarray((tenOutput.clip(0.0, 1.0).numpy(force=True).transpose(1, 2, 0)[:, :, ::-1] * 255.0).astype(numpy.uint8)).save(args_strOut)
+#         PIL.Image.fromarray((tenOutput.clip(0.0, 1.0).numpy(force=True).transpose(1, 2, 0)[:, :, ::-1] * 255.0).astype(numpy.uint8)).save(args_strOut)
 
-    elif args_strOut.split('.')[-1] in ['avi', 'mp4', 'webm', 'wmv']:
-        import moviepy
+#     elif args_strOut.split('.')[-1] in ['avi', 'mp4', 'webm', 'wmv']:
+#         import moviepy
 
-        objVideoreader = moviepy.VideoFileClip(filename=args_strVideo)
+#         objVideoreader = moviepy.VideoFileClip(filename=args_strVideo)
 
-        intWidth = objVideoreader.w
-        intHeight = objVideoreader.h
+#         intWidth = objVideoreader.w
+#         intHeight = objVideoreader.h
 
-        tenFrames = [None, None, None, None, None]
+#         tenFrames = [None, None, None, None, None]
 
-        with moviepy.video.io.ffmpeg_writer.FFMPEG_VideoWriter(filename=args_strOut, size=(intWidth, intHeight), fps=objVideoreader.fps) as objVideowriter:
-            for npyFrame in objVideoreader.iter_frames():
-                tenFrames[4] = torch.FloatTensor(numpy.ascontiguousarray(npyFrame[:, :, ::-1].transpose(2, 0, 1).astype(numpy.float32) * (1.0 / 255.0)))
+#         with moviepy.video.io.ffmpeg_writer.FFMPEG_VideoWriter(filename=args_strOut, size=(intWidth, intHeight), fps=objVideoreader.fps) as objVideowriter:
+#             for npyFrame in objVideoreader.iter_frames():
+#                 tenFrames[4] = torch.FloatTensor(numpy.ascontiguousarray(npyFrame[:, :, ::-1].transpose(2, 0, 1).astype(numpy.float32) * (1.0 / 255.0)))
 
-                if tenFrames[0] is not None:
-                    tenFrames[1:4] = estimate(tenFrames[0], tenFrames[4], [0.25, 0.5, 0.75])
+#                 if tenFrames[0] is not None:
+#                     tenFrames[1:4] = estimate(tenFrames[0], tenFrames[4], [0.25, 0.5, 0.75])
 
-                    objVideowriter.write_frame((tenFrames[0].clip(0.0, 1.0).numpy(force=True).transpose(1, 2, 0)[:, :, ::-1] * 255.0).astype(numpy.uint8))
-                    objVideowriter.write_frame((tenFrames[1].clip(0.0, 1.0).numpy(force=True).transpose(1, 2, 0)[:, :, ::-1] * 255.0).astype(numpy.uint8))
-                    objVideowriter.write_frame((tenFrames[2].clip(0.0, 1.0).numpy(force=True).transpose(1, 2, 0)[:, :, ::-1] * 255.0).astype(numpy.uint8))
-                    objVideowriter.write_frame((tenFrames[3].clip(0.0, 1.0).numpy(force=True).transpose(1, 2, 0)[:, :, ::-1] * 255.0).astype(numpy.uint8))
-                # end
+#                     objVideowriter.write_frame((tenFrames[0].clip(0.0, 1.0).numpy(force=True).transpose(1, 2, 0)[:, :, ::-1] * 255.0).astype(numpy.uint8))
+#                     objVideowriter.write_frame((tenFrames[1].clip(0.0, 1.0).numpy(force=True).transpose(1, 2, 0)[:, :, ::-1] * 255.0).astype(numpy.uint8))
+#                     objVideowriter.write_frame((tenFrames[2].clip(0.0, 1.0).numpy(force=True).transpose(1, 2, 0)[:, :, ::-1] * 255.0).astype(numpy.uint8))
+#                     objVideowriter.write_frame((tenFrames[3].clip(0.0, 1.0).numpy(force=True).transpose(1, 2, 0)[:, :, ::-1] * 255.0).astype(numpy.uint8))
+#                 # end
 
-                tenFrames[0] = torch.FloatTensor(numpy.ascontiguousarray(npyFrame[:, :, ::-1].transpose(2, 0, 1).astype(numpy.float32) * (1.0 / 255.0)))
-            # end
-        # end
+#                 tenFrames[0] = torch.FloatTensor(numpy.ascontiguousarray(npyFrame[:, :, ::-1].transpose(2, 0, 1).astype(numpy.float32) * (1.0 / 255.0)))
+#             # end
+#         # end
 
-    # end
-# end
+#     # end
+# # end

@@ -6,7 +6,6 @@ import numpy
 import os
 import skimage
 import skimage.metrics
-import sys
 import torch
 
 import run

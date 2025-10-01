@@ -3,7 +3,6 @@ import datetime
 import logging
 import sys
 
-import more_itertools
 import numpy as np
 import pathlib
 import PIL.Image
@@ -14,9 +13,6 @@ import torch.autograd
 import torch.utils.tensorboard as tb
 import torcheval.metrics
 import tqdm
-from tensorflow.python.ops.gen_summary_ops import summary_writer
-
-from typing import Any
 
 import dataset_triplet
 import softmax_basic
@@ -181,12 +177,15 @@ def train(network: softmax_basic.Model,
     progress.__enter__()
     last_checkpoint: pathlib.Path | None = None
 
+    for param in network.netFlow.parameters():
+        param.requires_grad = False
+
     try:
         for n_epoch in range(epochs):
             lr = n_epoch / (epochs - 1) if epochs > 1 else 0
             lr = initial_learning_rate * (1 - lr) + final_learning_rate * lr
             progress.__exit__(None, None, None)
-            optimizer = torch.optim.Adam(network.parameters(), lr=lr)
+            optimizer = torch.optim.Adam(network.netSynthesis.parameters(), lr=lr)
             logger.info(f"Epoch {n_epoch}. lr={lr}")
             progress = rich.progress.Progress()
             progress.__enter__()

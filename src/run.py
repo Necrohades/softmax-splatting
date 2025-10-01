@@ -1,28 +1,25 @@
 #!/usr/bin/env python
 
 import getopt
-import math
 import numpy
 import PIL
 import PIL.Image
 import sys
 import torch
-import typing
 
-import softsplat  # the custom softmax splatting layer
+import softsplat # the custom softmax splatting layer
 
 try:
-    from .correlation import correlation  # the custom cost volume layer
+    from .correlation import correlation # the custom cost volume layer
 except:
-    sys.path.insert(0, './correlation');
-    import correlation  # you should consider upgrading python
+    sys.path.insert(0, 'correlation'); import correlation # you should consider upgrading python
 # end
 
 ##########################################################
 
-torch.set_grad_enabled(False)  # make sure to not compute gradients for computational performance
+torch.set_grad_enabled(False) # make sure to not compute gradients for computational performance
 
-torch.backends.cudnn.enabled = True  # make sure to use cudnn for computational performance
+torch.backends.cudnn.enabled = True # make sure to use cudnn for computational performance
 
 ##########################################################
 
@@ -39,13 +36,11 @@ for strOption, strArg in getopt.getopt(sys.argv[1:], '', [
     'video=',
     'out=',
 ])[0]:
-    if strOption == '--model' and strArg != '': args_strModel = strArg  # which model to use
-    if strOption == '--one' and strArg != '': args_strOne = strArg  # path to the first frame
-    if strOption == '--two' and strArg != '': args_strTwo = strArg  # path to the second frame
-    if strOption == '--video' and strArg != '': args_strVideo = strArg  # path to a video
-    if strOption == '--out' and strArg != '': args_strOut = strArg  # path to where the output should be stored
-
-
+    if strOption == '--model' and strArg != '': args_strModel = strArg # which model to use
+    if strOption == '--one' and strArg != '': args_strOne = strArg # path to the first frame
+    if strOption == '--two' and strArg != '': args_strTwo = strArg # path to the second frame
+    if strOption == '--video' and strArg != '': args_strVideo = strArg # path to a video
+    if strOption == '--out' and strArg != '': args_strOut = strArg # path to where the output should be stored
 # end
 
 ##########################################################
@@ -55,40 +50,29 @@ def read_flo(strFile):
         strFlow = objFile.read()
     # end
 
-    assert (numpy.frombuffer(buffer=strFlow, dtype=numpy.float32, count=1, offset=0) == 202021.25)
+    assert(numpy.frombuffer(buffer=strFlow, dtype=numpy.float32, count=1, offset=0) == 202021.25)
 
     intWidth = numpy.frombuffer(buffer=strFlow, dtype=numpy.int32, count=1, offset=4)[0]
     intHeight = numpy.frombuffer(buffer=strFlow, dtype=numpy.int32, count=1, offset=8)[0]
 
-    return numpy.frombuffer(buffer=strFlow, dtype=numpy.float32, count=intHeight * intWidth * 2, offset=12).reshape(
-        intHeight, intWidth, 2)
-
-
+    return numpy.frombuffer(buffer=strFlow, dtype=numpy.float32, count=intHeight * intWidth * 2, offset=12).reshape(intHeight, intWidth, 2)
 # end
 
 ##########################################################
 
 backwarp_tenGrid = {}
 
-
 def backwarp(tenIn, tenFlow):
     if str(tenFlow.shape) not in backwarp_tenGrid:
-        tenHor = torch.linspace(start=-1.0, end=1.0, steps=tenFlow.shape[3], dtype=tenFlow.dtype,
-                                device=tenFlow.device).view(1, 1, 1, -1).repeat(1, 1, tenFlow.shape[2], 1)
-        tenVer = torch.linspace(start=-1.0, end=1.0, steps=tenFlow.shape[2], dtype=tenFlow.dtype,
-                                device=tenFlow.device).view(1, 1, -1, 1).repeat(1, 1, 1, tenFlow.shape[3])
+        tenHor = torch.linspace(start=-1.0, end=1.0, steps=tenFlow.shape[3], dtype=tenFlow.dtype, device=tenFlow.device).view(1, 1, 1, -1).repeat(1, 1, tenFlow.shape[2], 1)
+        tenVer = torch.linspace(start=-1.0, end=1.0, steps=tenFlow.shape[2], dtype=tenFlow.dtype, device=tenFlow.device).view(1, 1, -1, 1).repeat(1, 1, 1, tenFlow.shape[3])
 
         backwarp_tenGrid[str(tenFlow.shape)] = torch.cat([tenHor, tenVer], 1).cuda()
     # end
 
-    tenFlow = torch.cat([tenFlow[:, 0:1, :, :] / ((tenIn.shape[3] - 1.0) / 2.0),
-                         tenFlow[:, 1:2, :, :] / ((tenIn.shape[2] - 1.0) / 2.0)], 1)
+    tenFlow = torch.cat([tenFlow[:, 0:1, :, :] / ((tenIn.shape[3] - 1.0) / 2.0), tenFlow[:, 1:2, :, :] / ((tenIn.shape[2] - 1.0) / 2.0)], 1)
 
-    return torch.nn.functional.grid_sample(input=tenIn,
-                                           grid=(backwarp_tenGrid[str(tenFlow.shape)] + tenFlow).permute(0, 2, 3, 1),
-                                           mode='bilinear', padding_mode='zeros', align_corners=True)
-
-
+    return torch.nn.functional.grid_sample(input=tenIn, grid=(backwarp_tenGrid[str(tenFlow.shape)] + tenFlow).permute(0, 2, 3, 1), mode='bilinear', padding_mode='zeros', align_corners=True)
 # end
 
 ##########################################################
@@ -142,7 +126,6 @@ class Flow(torch.nn.Module):
                     torch.nn.Conv2d(in_channels=192, out_channels=192, kernel_size=3, stride=1, padding=1),
                     torch.nn.LeakyReLU(inplace=False, negative_slope=0.1)
                 )
-
             # end
 
             def forward(self, tenInput):
@@ -155,7 +138,6 @@ class Flow(torch.nn.Module):
 
                 return [tenFirst, tenSecond, tenThird, tenFourth, tenFifth, tenSixth]
             # end
-
         # end
 
         class Decoder(torch.nn.Module):
@@ -175,7 +157,6 @@ class Flow(torch.nn.Module):
                     torch.nn.LeakyReLU(inplace=False, negative_slope=0.1),
                     torch.nn.Conv2d(in_channels=32, out_channels=2, kernel_size=3, stride=1, padding=1)
                 )
-
             # end
 
             def forward(self, tenOne, tenTwo, objPrevious):
@@ -190,10 +171,7 @@ class Flow(torch.nn.Module):
                     tenMain = torch.cat([tenOne, tenVolume], 1)
 
                 elif objPrevious is not None:
-                    tenForward = torch.nn.functional.interpolate(input=objPrevious['tenForward'],
-                                                                 size=(intHeight, intWidth), mode='bilinear',
-                                                                 align_corners=False) / float(
-                        objPrevious['tenForward'].shape[3]) * float(intWidth)
+                    tenForward = torch.nn.functional.interpolate(input=objPrevious['tenForward'], size=(intHeight, intWidth), mode='bilinear', align_corners=False) / float(objPrevious['tenForward'].shape[3]) * float(intWidth)
 
                     tenVolume = correlation.FunctionCorrelation(tenOne=tenOne, tenTwo=backwarp(tenTwo, tenForward))
 
@@ -205,7 +183,6 @@ class Flow(torch.nn.Module):
                     'tenForward': self.netMain(tenMain)
                 }
             # end
-
         # end
 
         self.netExtractor = Extractor()
@@ -216,7 +193,6 @@ class Flow(torch.nn.Module):
         self.netFourth = Decoder(96 + 81 + 2)
         self.netFifth = Decoder(128 + 81 + 2)
         self.netSixth = Decoder(192 + 81)
-
     # end
 
     def forward(self, tenOne, tenTwo):
@@ -248,16 +224,10 @@ class Flow(torch.nn.Module):
         objBackward = self.netFirst(tenTwo[-6], tenOne[-6], objBackward)
 
         return {
-            'tenForward': torch.nn.functional.interpolate(input=objForward['tenForward'], size=(intHeight, intWidth),
-                                                          mode='bilinear', align_corners=False) * (
-                                      float(intWidth) / float(objForward['tenForward'].shape[3])),
-            'tenBackward': torch.nn.functional.interpolate(input=objBackward['tenForward'], size=(intHeight, intWidth),
-                                                           mode='bilinear', align_corners=False) * (
-                                       float(intWidth) / float(objBackward['tenForward'].shape[3]))
+            'tenForward': torch.nn.functional.interpolate(input=objForward['tenForward'], size=(intHeight, intWidth), mode='bilinear', align_corners=False) * (float(intWidth) / float(objForward['tenForward'].shape[3])),
+            'tenBackward': torch.nn.functional.interpolate(input=objBackward['tenForward'], size=(intHeight, intWidth), mode='bilinear', align_corners=False) * (float(intWidth) / float(objBackward['tenForward'].shape[3]))
         }
     # end
-
-
 # end
 
 ##########################################################
@@ -273,20 +243,16 @@ class Synthesis(torch.nn.Module):
                 if strType == 'relu-conv-relu-conv':
                     self.netMain = torch.nn.Sequential(
                         torch.nn.PReLU(num_parameters=intChannels[0], init=0.25),
-                        torch.nn.Conv2d(in_channels=intChannels[0], out_channels=intChannels[1], kernel_size=3,
-                                        stride=1, padding=1, bias=False),
+                        torch.nn.Conv2d(in_channels=intChannels[0], out_channels=intChannels[1], kernel_size=3, stride=1, padding=1, bias=False),
                         torch.nn.PReLU(num_parameters=intChannels[1], init=0.25),
-                        torch.nn.Conv2d(in_channels=intChannels[1], out_channels=intChannels[2], kernel_size=3,
-                                        stride=1, padding=1, bias=False)
+                        torch.nn.Conv2d(in_channels=intChannels[1], out_channels=intChannels[2], kernel_size=3, stride=1, padding=1, bias=False)
                     )
 
                 elif strType == 'conv-relu-conv':
                     self.netMain = torch.nn.Sequential(
-                        torch.nn.Conv2d(in_channels=intChannels[0], out_channels=intChannels[1], kernel_size=3,
-                                        stride=1, padding=1, bias=False),
+                        torch.nn.Conv2d(in_channels=intChannels[0], out_channels=intChannels[1], kernel_size=3, stride=1, padding=1, bias=False),
                         torch.nn.PReLU(num_parameters=intChannels[1], init=0.25),
-                        torch.nn.Conv2d(in_channels=intChannels[1], out_channels=intChannels[2], kernel_size=3,
-                                        stride=1, padding=1, bias=False)
+                        torch.nn.Conv2d(in_channels=intChannels[1], out_channels=intChannels[2], kernel_size=3, stride=1, padding=1, bias=False)
                     )
 
                 # end
@@ -298,12 +264,10 @@ class Synthesis(torch.nn.Module):
                         self.netShortcut = None
 
                     elif intChannels[0] != intChannels[2]:
-                        self.netShortcut = torch.nn.Conv2d(in_channels=intChannels[0], out_channels=intChannels[2],
-                                                           kernel_size=1, stride=1, padding=0, bias=False)
+                        self.netShortcut = torch.nn.Conv2d(in_channels=intChannels[0], out_channels=intChannels[2], kernel_size=1, stride=1, padding=0, bias=False)
 
                     # end
                 # end
-
             # end
 
             def forward(self, tenInput):
@@ -319,7 +283,6 @@ class Synthesis(torch.nn.Module):
 
                 # end
             # end
-
         # end
 
         class Downsample(torch.nn.Module):
@@ -328,19 +291,15 @@ class Synthesis(torch.nn.Module):
 
                 self.netMain = torch.nn.Sequential(
                     torch.nn.PReLU(num_parameters=intChannels[0], init=0.25),
-                    torch.nn.Conv2d(in_channels=intChannels[0], out_channels=intChannels[1], kernel_size=3, stride=2,
-                                    padding=1, bias=False),
+                    torch.nn.Conv2d(in_channels=intChannels[0], out_channels=intChannels[1], kernel_size=3, stride=2, padding=1, bias=False),
                     torch.nn.PReLU(num_parameters=intChannels[1], init=0.25),
-                    torch.nn.Conv2d(in_channels=intChannels[1], out_channels=intChannels[2], kernel_size=3, stride=1,
-                                    padding=1, bias=False)
+                    torch.nn.Conv2d(in_channels=intChannels[1], out_channels=intChannels[2], kernel_size=3, stride=1, padding=1, bias=False)
                 )
-
             # end
 
             def forward(self, tenInput):
                 return self.netMain(tenInput)
             # end
-
         # end
 
         class Upsample(torch.nn.Module):
@@ -350,19 +309,15 @@ class Synthesis(torch.nn.Module):
                 self.netMain = torch.nn.Sequential(
                     torch.nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False),
                     torch.nn.PReLU(num_parameters=intChannels[0], init=0.25),
-                    torch.nn.Conv2d(in_channels=intChannels[0], out_channels=intChannels[1], kernel_size=3, stride=1,
-                                    padding=1, bias=False),
+                    torch.nn.Conv2d(in_channels=intChannels[0], out_channels=intChannels[1], kernel_size=3, stride=1, padding=1, bias=False),
                     torch.nn.PReLU(num_parameters=intChannels[1], init=0.25),
-                    torch.nn.Conv2d(in_channels=intChannels[1], out_channels=intChannels[2], kernel_size=3, stride=1,
-                                    padding=1, bias=False)
+                    torch.nn.Conv2d(in_channels=intChannels[1], out_channels=intChannels[2], kernel_size=3, stride=1, padding=1, bias=False)
                 )
-
             # end
 
             def forward(self, tenInput):
                 return self.netMain(tenInput)
             # end
-
         # end
 
         class Encode(torch.nn.Module):
@@ -389,7 +344,6 @@ class Synthesis(torch.nn.Module):
                     torch.nn.Conv2d(in_channels=96, out_channels=96, kernel_size=3, stride=1, padding=1, bias=False),
                     torch.nn.PReLU(num_parameters=96, init=0.25)
                 )
-
             # end
 
             def forward(self, tenInput):
@@ -401,21 +355,17 @@ class Synthesis(torch.nn.Module):
 
                 return [torch.cat([tenInput, tenOutput[0]], 1)] + tenOutput[1:]
             # end
-
         # end
 
         class Softmetric(torch.nn.Module):
             def __init__(self):
                 super().__init__()
 
-                self.netInput = torch.nn.Conv2d(in_channels=3, out_channels=12, kernel_size=3, stride=1, padding=1,
-                                                bias=False)
-                self.netError = torch.nn.Conv2d(in_channels=1, out_channels=4, kernel_size=3, stride=1, padding=1,
-                                                bias=False)
+                self.netInput = torch.nn.Conv2d(in_channels=3, out_channels=12, kernel_size=3, stride=1, padding=1, bias=False)
+                self.netError = torch.nn.Conv2d(in_channels=1, out_channels=4, kernel_size=3, stride=1, padding=1, bias=False)
 
                 for intRow, intFeatures in [(0, 16), (1, 32), (2, 64), (3, 96)]:
-                    self.add_module(str(intRow) + 'x0' + ' - ' + str(intRow) + 'x1',
-                                    Basic('relu-conv-relu-conv', [intFeatures, intFeatures, intFeatures], True))
+                    self.add_module(str(intRow) + 'x0' + ' - ' + str(intRow) + 'x1', Basic('relu-conv-relu-conv', [intFeatures, intFeatures, intFeatures], True))
                 # end
 
                 for intCol in [0]:
@@ -431,39 +381,24 @@ class Synthesis(torch.nn.Module):
                 # end
 
                 self.netOutput = Basic('conv-relu-conv', [16, 16, 1], True)
-
             # end
 
             def forward(self, tenEncone, tenEnctwo, tenFlow):
                 tenColumn = [None, None, None, None]
 
-                tenColumn[0] = torch.cat([self.netInput(tenEncone[0][:, 0:3, :, :]), self.netError(
-                    torch.nn.functional.l1_loss(input=tenEncone[0], target=backwarp(tenEnctwo[0], tenFlow),
-                                                reduction='none').mean([1], True))], 1)
+                tenColumn[0] = torch.cat([self.netInput(tenEncone[0][:, 0:3, :, :]), self.netError(torch.nn.functional.l1_loss(input=tenEncone[0], target=backwarp(tenEnctwo[0], tenFlow), reduction='none').mean([1], True))], 1)
                 tenColumn[1] = self._modules['0x0 - 1x0'](tenColumn[0])
                 tenColumn[2] = self._modules['1x0 - 2x0'](tenColumn[1])
                 tenColumn[3] = self._modules['2x0 - 3x0'](tenColumn[2])
 
                 intColumn = 1
-                for intRow in range(len(tenColumn) - 1, -1, -1):
-                    tenColumn[intRow] = self._modules[
-                        str(intRow) + 'x' + str(intColumn - 1) + ' - ' + str(intRow) + 'x' + str(intColumn)](
-                        tenColumn[intRow])
+                for intRow in range(len(tenColumn) -1, -1, -1):
+                    tenColumn[intRow] = self._modules[str(intRow) + 'x' + str(intColumn - 1) + ' - ' + str(intRow) + 'x' + str(intColumn)](tenColumn[intRow])
                     if intRow != len(tenColumn) - 1:
-                        tenUp = self._modules[
-                            str(intRow + 1) + 'x' + str(intColumn) + ' - ' + str(intRow) + 'x' + str(intColumn)](
-                            tenColumn[intRow + 1])
+                        tenUp = self._modules[str(intRow + 1) + 'x' + str(intColumn) + ' - ' + str(intRow) + 'x' + str(intColumn)](tenColumn[intRow + 1])
 
-                        if tenUp.shape[2] != tenColumn[intRow].shape[2]: tenUp = torch.nn.functional.pad(input=tenUp,
-                                                                                                         pad=[0, 0, 0,
-                                                                                                              -1],
-                                                                                                         mode='constant',
-                                                                                                         value=0.0)
-                        if tenUp.shape[3] != tenColumn[intRow].shape[3]: tenUp = torch.nn.functional.pad(input=tenUp,
-                                                                                                         pad=[0, -1, 0,
-                                                                                                              0],
-                                                                                                         mode='constant',
-                                                                                                         value=0.0)
+                        if tenUp.shape[2] != tenColumn[intRow].shape[2]: tenUp = torch.nn.functional.pad(input=tenUp, pad=[0, 0, 0, -1], mode='constant', value=0.0)
+                        if tenUp.shape[3] != tenColumn[intRow].shape[3]: tenUp = torch.nn.functional.pad(input=tenUp, pad=[0, -1, 0, 0], mode='constant', value=0.0)
 
                         tenColumn[intRow] = tenColumn[intRow] + tenUp
                     # end
@@ -471,7 +406,6 @@ class Synthesis(torch.nn.Module):
 
                 return self.netOutput(tenColumn[0])
             # end
-
         # end
 
         class Warp(torch.nn.Module):
@@ -481,11 +415,9 @@ class Synthesis(torch.nn.Module):
                 self.netOne = Basic('conv-relu-conv', [3 + 3 + 32 + 32 + 1 + 1, 32, 32], True)
                 self.netTwo = Basic('conv-relu-conv', [0 + 0 + 64 + 64 + 1 + 1, 64, 64], True)
                 self.netThr = Basic('conv-relu-conv', [0 + 0 + 96 + 96 + 1 + 1, 96, 96], True)
-
             # end
 
-            def forward(self, tenEncone: list[torch.Tensor], tenEnctwo: list[torch.Tensor], tenMetricone: torch.Tensor,
-                        tenMetrictwo: torch.Tensor, tenForward, tenBackward):
+            def forward(self, tenEncone: list[torch.Tensor], tenEnctwo: list[torch.Tensor], tenMetricone: torch.Tensor, tenMetrictwo: torch.Tensor, tenForward, tenBackward):
                 tenWarpedOne: list[torch.Tensor] = []
                 tenWarpedTwo: list[torch.Tensor] = []
                 tenOutput: list[torch.Tensor] = []
@@ -494,41 +426,20 @@ class Synthesis(torch.nn.Module):
 
                 for intLevel in range(3):
                     if intLevel != 0:
-                        tenMetricone = torch.nn.functional.interpolate(input=tenMetricone,
-                                                                       size=(tenEncone[intLevel].shape[2],
-                                                                             tenEncone[intLevel].shape[3]),
-                                                                       mode='bilinear', align_corners=False)
-                        tenMetrictwo = torch.nn.functional.interpolate(input=tenMetrictwo,
-                                                                       size=(tenEnctwo[intLevel].shape[2],
-                                                                             tenEnctwo[intLevel].shape[3]),
-                                                                       mode='bilinear', align_corners=False)
+                        tenMetricone = torch.nn.functional.interpolate(input=tenMetricone, size=(tenEncone[intLevel].shape[2], tenEncone[intLevel].shape[3]), mode='bilinear', align_corners=False)
+                        tenMetrictwo = torch.nn.functional.interpolate(input=tenMetrictwo, size=(tenEnctwo[intLevel].shape[2], tenEnctwo[intLevel].shape[3]), mode='bilinear', align_corners=False)
 
-                        tenForward = torch.nn.functional.interpolate(input=tenForward,
-                                                                     size=(tenEncone[intLevel].shape[2],
-                                                                           tenEncone[intLevel].shape[3]),
-                                                                     mode='bilinear', align_corners=False) * (
-                                                 float(tenEncone[intLevel].shape[3]) / float(tenForward.shape[3]))
-                        tenBackward = torch.nn.functional.interpolate(input=tenBackward,
-                                                                      size=(tenEnctwo[intLevel].shape[2],
-                                                                            tenEnctwo[intLevel].shape[3]),
-                                                                      mode='bilinear', align_corners=False) * (
-                                                  float(tenEnctwo[intLevel].shape[3]) / float(tenBackward.shape[3]))
+                        tenForward = torch.nn.functional.interpolate(input=tenForward, size=(tenEncone[intLevel].shape[2], tenEncone[intLevel].shape[3]), mode='bilinear', align_corners=False) * (float(tenEncone[intLevel].shape[3]) / float(tenForward.shape[3]))
+                        tenBackward = torch.nn.functional.interpolate(input=tenBackward, size=(tenEnctwo[intLevel].shape[2], tenEnctwo[intLevel].shape[3]), mode='bilinear', align_corners=False) * (float(tenEnctwo[intLevel].shape[3]) / float(tenBackward.shape[3]))
                     # end
 
                     tenWarpedOne.append(
-                        softsplat.softsplat(tenIn=torch.cat([tenEncone[intLevel], tenMetricone], 1), tenFlow=tenForward,
-                                            tenMetric=tenMetricone.neg().clip(-20.0, 20.0), strMode='soft'))
-                    tenWarpedTwo.append(softsplat.softsplat(tenIn=torch.cat([tenEnctwo[intLevel], tenMetrictwo], 1),
-                                                            tenFlow=tenBackward,
-                                                            tenMetric=tenMetrictwo.neg().clip(-20.0, 20.0),
-                                                            strMode='soft'))
+                        softsplat.softsplat(tenIn=torch.cat([tenEncone[intLevel], tenMetricone], 1), tenFlow=tenForward, tenMetric=tenMetricone.neg().clip(-20.0, 20.0), strMode='soft'))
+                    tenWarpedTwo.append(softsplat.softsplat(tenIn=torch.cat([tenEnctwo[intLevel], tenMetrictwo], 1), tenFlow=tenBackward, tenMetric=tenMetrictwo.neg().clip(-20.0, 20.0), strMode='soft'))
 
-                    tenOutput.append([self.netOne, self.netTwo, self.netThr][intLevel](
-                        torch.cat([tenWarpedOne[-1], tenWarpedTwo[-1]], 1)))
-                    tenOutOne.append([self.netOne, self.netTwo, self.netThr][intLevel](
-                        torch.cat([tenWarpedOne[-1], tenWarpedOne[-1]], 1)))
-                    tenOutTwo.append([self.netOne, self.netTwo, self.netThr][intLevel](
-                        torch.cat([tenWarpedOne[-1], tenWarpedTwo[-1]], 1)))
+                    tenOutput.append([self.netOne, self.netTwo, self.netThr][intLevel](torch.cat([tenWarpedOne[-1], tenWarpedTwo[-1]], 1)))
+                    tenOutOne.append([self.netOne, self.netTwo, self.netThr][intLevel](torch.cat([tenWarpedOne[-1], tenWarpedOne[-1]], 1)))
+                    tenOutTwo.append([self.netOne, self.netTwo, self.netThr][intLevel](torch.cat([tenWarpedOne[-1], tenWarpedTwo[-1]], 1)))
                 # end
 
                 print("tenOutput:", [t.shape for t in tenOutput])
@@ -539,7 +450,6 @@ class Synthesis(torch.nn.Module):
 
                 return tenOutput, tenOutOne, tenOutTwo
             # end
-
         # end
 
         self.netEncode = Encode()
@@ -548,17 +458,12 @@ class Synthesis(torch.nn.Module):
 
         self.netWarp = Warp()
 
-        for intRow, intFeatures in enumerate([32, 64, 96]):  # [(0, 32), (1, 64), (2, 96)]:
-            self.add_module(str(intRow) + 'x0' + ' - ' + str(intRow) + 'x1',
-                            Basic('relu-conv-relu-conv', [intFeatures, intFeatures, intFeatures], True))
-            self.add_module(str(intRow) + 'x1' + ' - ' + str(intRow) + 'x2',
-                            Basic('relu-conv-relu-conv', [intFeatures, intFeatures, intFeatures], True))
-            self.add_module(str(intRow) + 'x2' + ' - ' + str(intRow) + 'x3',
-                            Basic('relu-conv-relu-conv', [intFeatures, intFeatures, intFeatures], True))
-            self.add_module(str(intRow) + 'x3' + ' - ' + str(intRow) + 'x4',
-                            Basic('relu-conv-relu-conv', [intFeatures, intFeatures, intFeatures], True))
-            self.add_module(str(intRow) + 'x4' + ' - ' + str(intRow) + 'x5',
-                            Basic('relu-conv-relu-conv', [intFeatures, intFeatures, intFeatures], True))
+        for intRow, intFeatures in enumerate([32, 64, 96]): #[(0, 32), (1, 64), (2, 96)]:
+            self.add_module(str(intRow) + 'x0' + ' - ' + str(intRow) + 'x1', Basic('relu-conv-relu-conv', [intFeatures, intFeatures, intFeatures], True))
+            self.add_module(str(intRow) + 'x1' + ' - ' + str(intRow) + 'x2', Basic('relu-conv-relu-conv', [intFeatures, intFeatures, intFeatures], True))
+            self.add_module(str(intRow) + 'x2' + ' - ' + str(intRow) + 'x3', Basic('relu-conv-relu-conv', [intFeatures, intFeatures, intFeatures], True))
+            self.add_module(str(intRow) + 'x3' + ' - ' + str(intRow) + 'x4', Basic('relu-conv-relu-conv', [intFeatures, intFeatures, intFeatures], True))
+            self.add_module(str(intRow) + 'x4' + ' - ' + str(intRow) + 'x5', Basic('relu-conv-relu-conv', [intFeatures, intFeatures, intFeatures], True))
         # end
 
         for intCol in [0, 1, 2]:
@@ -572,7 +477,6 @@ class Synthesis(torch.nn.Module):
         # end
 
         self.netOutput = Basic('conv-relu-conv', [32, 32, 3], True)
-
     # end
 
     def forward(self, tenOne, tenTwo, tenForward, tenBackward, fltTime):
@@ -585,8 +489,7 @@ class Synthesis(torch.nn.Module):
         tenForward = tenForward * fltTime
         tenBackward = tenBackward * (1.0 - fltTime)
 
-        tenWarp, _, _ = map(self.get_output,
-                            self.netWarp(tenEncone, tenEnctwo, tenMetricone, tenMetrictwo, tenForward, tenBackward))
+        tenWarp, _, _ = map(self.get_output, self.netWarp(tenEncone, tenEnctwo, tenMetricone, tenMetrictwo, tenForward, tenBackward))
 
         method = "soft"
         if method == "sum":
@@ -595,9 +498,9 @@ class Synthesis(torch.nn.Module):
         else:
             tenWarp1 = softsplat.softsplat(tenOne, tenForward, tenMetricone.neg().clip(-20, 20.0), method)
             tenWarp2 = softsplat.softsplat(tenTwo, tenBackward, tenMetrictwo.neg().clip(-20, 20.0), method)
-
+        
         tenWarp3 = (tenWarp1 + tenWarp2) / 2
-
+        
         tenWarp1 = (tenWarp1 + 1) / 4
         tenWarp2 = (tenWarp2 + 1) / 4
         tenWarp3 = (tenWarp3 + 1) / 4
@@ -607,15 +510,9 @@ class Synthesis(torch.nn.Module):
         out2 = args_strOut[:i] + "w2" + args_strOut[i:]
         out3 = args_strOut[:i] + "avg" + args_strOut[i:]
 
-        PIL.Image.fromarray(
-            (tenWarp1[0, :, :, :].cpu().clip(0.0, 1.0).numpy(force=True).transpose(1, 2, 0)[:, :, ::-1] * 255.0).astype(
-                numpy.uint8)).save(out1)
-        PIL.Image.fromarray(
-            (tenWarp2[0, :, :, :].cpu().clip(0.0, 1.0).numpy(force=True).transpose(1, 2, 0)[:, :, ::-1] * 255.0).astype(
-                numpy.uint8)).save(out2)
-        PIL.Image.fromarray(
-            (tenWarp3[0, :, :, :].cpu().clip(0.0, 1.0).numpy(force=True).transpose(1, 2, 0)[:, :, ::-1] * 255.0).astype(
-                numpy.uint8)).save(out3)
+        PIL.Image.fromarray((tenWarp1[0, :, :, :].cpu().clip(0.0, 1.0).numpy(force=True).transpose(1, 2, 0)[:, :, ::-1] * 255.0).astype(numpy.uint8)).save(out1)
+        PIL.Image.fromarray((tenWarp2[0, :, :, :].cpu().clip(0.0, 1.0).numpy(force=True).transpose(1, 2, 0)[:, :, ::-1] * 255.0).astype(numpy.uint8)).save(out2)
+        PIL.Image.fromarray((tenWarp3[0, :, :, :].cpu().clip(0.0, 1.0).numpy(force=True).transpose(1, 2, 0)[:, :, ::-1] * 255.0).astype(numpy.uint8)).save(out3)
 
         return tenWarp
 
@@ -628,35 +525,21 @@ class Synthesis(torch.nn.Module):
 
         for intColumn in range(1, 3):
             for intRow in range(len(tenColumn)):
-                tenColumn[intRow] = self._modules[
-                    str(intRow) + 'x' + str(intColumn - 1) + ' - ' + str(intRow) + 'x' + str(intColumn)](
-                    tenColumn[intRow])
+                tenColumn[intRow] = self._modules[str(intRow) + 'x' + str(intColumn - 1) + ' - ' + str(intRow) + 'x' + str(intColumn)](tenColumn[intRow])
                 if intRow != 0:
-                    tenColumn[intRow] = tenColumn[intRow] + self._modules[
-                        str(intRow - 1) + 'x' + str(intColumn) + ' - ' + str(intRow) + 'x' + str(intColumn)](
-                        tenColumn[intRow - 1])
+                    tenColumn[intRow] = tenColumn[intRow] + self._modules[str(intRow - 1) + 'x' + str(intColumn) + ' - ' + str(intRow) + 'x' + str(intColumn)](tenColumn[intRow - 1])
                 # end
             # end
         # end
 
         for intColumn in range(3, 6):
-            for intRow in range(len(tenColumn) - 1, -1, -1):
-                tenColumn[intRow] = self._modules[
-                    str(intRow) + 'x' + str(intColumn - 1) + ' - ' + str(intRow) + 'x' + str(intColumn)](
-                    tenColumn[intRow])
+            for intRow in range(len(tenColumn) -1, -1, -1):
+                tenColumn[intRow] = self._modules[str(intRow) + 'x' + str(intColumn - 1) + ' - ' + str(intRow) + 'x' + str(intColumn)](tenColumn[intRow])
                 if intRow != len(tenColumn) - 1:
-                    tenUp = self._modules[
-                        str(intRow + 1) + 'x' + str(intColumn) + ' - ' + str(intRow) + 'x' + str(intColumn)](
-                        tenColumn[intRow + 1])
+                    tenUp = self._modules[str(intRow + 1) + 'x' + str(intColumn) + ' - ' + str(intRow) + 'x' + str(intColumn)](tenColumn[intRow + 1])
 
-                    if tenUp.shape[2] != tenColumn[intRow].shape[2]: tenUp = torch.nn.functional.pad(input=tenUp,
-                                                                                                     pad=[0, 0, 0, -1],
-                                                                                                     mode='constant',
-                                                                                                     value=0.0)
-                    if tenUp.shape[3] != tenColumn[intRow].shape[3]: tenUp = torch.nn.functional.pad(input=tenUp,
-                                                                                                     pad=[0, -1, 0, 0],
-                                                                                                     mode='constant',
-                                                                                                     value=0.0)
+                    if tenUp.shape[2] != tenColumn[intRow].shape[2]: tenUp = torch.nn.functional.pad(input=tenUp, pad=[0, 0, 0, -1], mode='constant', value=0.0)
+                    if tenUp.shape[3] != tenColumn[intRow].shape[3]: tenUp = torch.nn.functional.pad(input=tenUp, pad=[0, -1, 0, 0], mode='constant', value=0.0)
 
                     tenColumn[intRow] = tenColumn[intRow] + tenUp
                 # end
@@ -665,8 +548,6 @@ class Synthesis(torch.nn.Module):
 
         return self.netOutput(tenColumn[0])
     # end
-
-
 # end
 
 ##########################################################
@@ -679,77 +560,29 @@ class Network(torch.nn.Module):
 
         self.netSynthesis = Synthesis()
 
-        self.load_state_dict({strKey.replace('module', 'net'): tenWeight for strKey, tenWeight in
-                              torch.hub.load_state_dict_from_url(
-                                  url='http://content.sniklaus.com/softsplat/network-' + args_strModel + '.pytorch',
-                                  file_name='softsplat-' + args_strModel).items()})
-
+        self.load_state_dict({strKey.replace('module', 'net'): tenWeight for strKey, tenWeight in torch.hub.load_state_dict_from_url(url='http://content.sniklaus.com/softsplat/network-' + args_strModel + '.pytorch', file_name='softsplat-' + args_strModel).items()})
     # end
 
     def forward(self, tenOne, tenTwo, fltTimes):
         with torch.set_grad_enabled(False):
             tenStats = [tenOne, tenTwo]
             tenMean = sum([tenIn.mean([1, 2, 3], True) for tenIn in tenStats]) / len(tenStats)
-            tenStd = (sum([tenIn.std([1, 2, 3], False, True).square() + (tenMean - tenIn.mean([1, 2, 3], True)).square()
-                           for tenIn in tenStats]) / len(tenStats)).sqrt()
+            tenStd = (sum([tenIn.std([1, 2, 3], False, True).square() + (tenMean - tenIn.mean([1, 2, 3], True)).square() for tenIn in tenStats]) / len(tenStats)).sqrt()
             tenOne = ((tenOne - tenMean) / (tenStd + 0.0000001)).detach()
             tenTwo = ((tenTwo - tenMean) / (tenStd + 0.0000001)).detach()
         # end
 
         objFlow = self.netFlow(tenOne, tenTwo)
 
-        tenImages = [self.netSynthesis(tenOne, tenTwo, objFlow['tenForward'], objFlow['tenBackward'], fltTime) for
-                     fltTime in fltTimes]
+        tenImages = [self.netSynthesis(tenOne, tenTwo, objFlow['tenForward'], objFlow['tenBackward'], fltTime) for fltTime in fltTimes]
 
         return [(tenImage * tenStd) + tenMean for tenImage in tenImages]
     # end
-
-
 # end
 
 netNetwork = None
 
-
 ##########################################################
-
-import numpy as np
-
-
-def to_image(image: torch.Tensor, index: int = 0) -> PIL.Image.Image:
-    array = image.clip(0.0, 1.0).permute((0, 2, 3, 1))[index].numpy(force=True) * 255.0
-    return PIL.Image.fromarray(array[:, :, ::-1].astype(np.uint8))
-
-
-def warp(network: Network, ten_one: torch.Tensor, ten_two: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-    with torch.set_grad_enabled(False):
-        ten_stats = [ten_one, ten_two]
-        ten_mean = sum([ten_in.mean([1, 2, 3], True) for ten_in in ten_stats]) / len(ten_stats)
-        ten_std = (sum(ten_in.std([1, 2, 3], unbiased=False, keepdim=True).square() + (ten_mean - ten_in.mean([1, 2, 3], True)).square()
-                       for ten_in in ten_stats) / len(ten_stats)).sqrt()
-        ten_one = ((ten_one - ten_mean) / (ten_std + 1e-7)).detach()
-        ten_two = ((ten_two - ten_mean) / (ten_std + 1e-7)).detach()
-
-    obj_flow = network.netFlow(ten_one, ten_two)
-    ten_forward = obj_flow["tenForward"]
-    ten_backward = obj_flow["tenBackward"]
-    ten_enc_one = network.netSynthesis.netEncode(ten_one)
-    ten_enc_two = network.netSynthesis.netEncode(ten_two)
-
-    print(repr(ten_forward))
-
-    ten_metric_one = network.netSynthesis.netSoftmetric(ten_enc_one, ten_enc_two, ten_forward)
-    ten_metric_two = network.netSynthesis.netSoftmetric(ten_enc_two, ten_enc_one, ten_backward)
-
-    ten_forward = ten_forward * .5
-    ten_backward = ten_backward * .5
-
-    ten_warp1 = softsplat.softsplat(ten_one, ten_forward, ten_metric_one.neg().clip(-20, 20.0), "soft")
-    ten_warp2 = softsplat.softsplat(ten_two, ten_backward, ten_metric_two.neg().clip(-20, 20.0), "soft")
-    ten_warp1 = (ten_warp1 * ten_std) + ten_mean
-    ten_warp2 = (ten_warp2 * ten_std) + ten_mean
-
-    return ten_warp1, ten_warp2
-
 
 def estimate(tenOne, tenTwo, fltTimes):
     global netNetwork
@@ -758,8 +591,8 @@ def estimate(tenOne, tenTwo, fltTimes):
         netNetwork = Network().cuda().train(False)
     # end
 
-    assert (tenOne.shape[1] == tenTwo.shape[1])
-    assert (tenOne.shape[2] == tenTwo.shape[2])
+    assert(tenOne.shape[1] == tenTwo.shape[1])
+    assert(tenOne.shape[2] == tenTwo.shape[2])
 
     intWidth = tenOne.shape[2]
     intHeight = tenOne.shape[1]
@@ -770,36 +603,22 @@ def estimate(tenOne, tenTwo, fltTimes):
     intPadr = (2 - (intWidth % 2)) % 2
     intPadb = (2 - (intHeight % 2)) % 2
 
-    tenPreprocessedOne = torch.nn.functional.pad(input=tenPreprocessedOne, pad=[0, intPadr, 0, intPadb],
-                                                 mode='replicate')
-    tenPreprocessedTwo = torch.nn.functional.pad(input=tenPreprocessedTwo, pad=[0, intPadr, 0, intPadb],
-                                                 mode='replicate')
+    tenPreprocessedOne = torch.nn.functional.pad(input=tenPreprocessedOne, pad=[0, intPadr, 0, intPadb], mode='replicate')
+    tenPreprocessedTwo = torch.nn.functional.pad(input=tenPreprocessedTwo, pad=[0, intPadr, 0, intPadb], mode='replicate')
 
-    w1, w2 = warp(netNetwork, tenPreprocessedOne, tenPreprocessedTwo)
-    to_image(w1).save("w1.png")
-    to_image(w2).save("w2.png")
-
-    return [tenImage[0, :, :intHeight, :intWidth].cpu() for tenImage in
-            netNetwork(tenPreprocessedOne, tenPreprocessedTwo, fltTimes)]
-
-
+    return [tenImage[0, :, :intHeight, :intWidth].cpu() for tenImage in netNetwork(tenPreprocessedOne, tenPreprocessedTwo, fltTimes)]
 # end
 
 ##########################################################
 
 if __name__ == '__main__':
     if args_strOut.split('.')[-1] in ['bmp', 'jpg', 'jpeg', 'png']:
-        tenOne = torch.FloatTensor(numpy.ascontiguousarray(
-            numpy.array(PIL.Image.open(args_strOne))[:, :, ::-1].transpose(2, 0, 1).astype(numpy.float32) * (
-                        1.0 / 255.0)))
-        tenTwo = torch.FloatTensor(numpy.ascontiguousarray(
-            numpy.array(PIL.Image.open(args_strTwo))[:, :, ::-1].transpose(2, 0, 1).astype(numpy.float32) * (
-                        1.0 / 255.0)))
+        tenOne = torch.FloatTensor(numpy.ascontiguousarray(numpy.array(PIL.Image.open(args_strOne))[:, :, ::-1].transpose(2, 0, 1).astype(numpy.float32) * (1.0 / 255.0)))
+        tenTwo = torch.FloatTensor(numpy.ascontiguousarray(numpy.array(PIL.Image.open(args_strTwo))[:, :, ::-1].transpose(2, 0, 1).astype(numpy.float32) * (1.0 / 255.0)))
 
         tenOutput = estimate(tenOne, tenTwo, [0.5])[0]
 
-        PIL.Image.fromarray((tenOutput.clip(0.0, 1.0).numpy(force=True).transpose(1, 2, 0)[:, :, ::-1] * 255.0).astype(
-            numpy.uint8)).save(args_strOut)
+        PIL.Image.fromarray((tenOutput.clip(0.0, 1.0).numpy(force=True).transpose(1, 2, 0)[:, :, ::-1] * 255.0).astype(numpy.uint8)).save(args_strOut)
 
     elif args_strOut.split('.')[-1] in ['avi', 'mp4', 'webm', 'wmv']:
         import moviepy
@@ -811,31 +630,20 @@ if __name__ == '__main__':
 
         tenFrames = [None, None, None, None, None]
 
-        with moviepy.video.io.ffmpeg_writer.FFMPEG_VideoWriter(filename=args_strOut, size=(intWidth, intHeight),
-                                                               fps=objVideoreader.fps) as objVideowriter:
+        with moviepy.video.io.ffmpeg_writer.FFMPEG_VideoWriter(filename=args_strOut, size=(intWidth, intHeight), fps=objVideoreader.fps) as objVideowriter:
             for npyFrame in objVideoreader.iter_frames():
-                tenFrames[4] = torch.FloatTensor(numpy.ascontiguousarray(
-                    npyFrame[:, :, ::-1].transpose(2, 0, 1).astype(numpy.float32) * (1.0 / 255.0)))
+                tenFrames[4] = torch.FloatTensor(numpy.ascontiguousarray(npyFrame[:, :, ::-1].transpose(2, 0, 1).astype(numpy.float32) * (1.0 / 255.0)))
 
                 if tenFrames[0] is not None:
                     tenFrames[1:4] = estimate(tenFrames[0], tenFrames[4], [0.25, 0.5, 0.75])
 
-                    objVideowriter.write_frame(
-                        (tenFrames[0].clip(0.0, 1.0).numpy(force=True).transpose(1, 2, 0)[:, :, ::-1] * 255.0).astype(
-                            numpy.uint8))
-                    objVideowriter.write_frame(
-                        (tenFrames[1].clip(0.0, 1.0).numpy(force=True).transpose(1, 2, 0)[:, :, ::-1] * 255.0).astype(
-                            numpy.uint8))
-                    objVideowriter.write_frame(
-                        (tenFrames[2].clip(0.0, 1.0).numpy(force=True).transpose(1, 2, 0)[:, :, ::-1] * 255.0).astype(
-                            numpy.uint8))
-                    objVideowriter.write_frame(
-                        (tenFrames[3].clip(0.0, 1.0).numpy(force=True).transpose(1, 2, 0)[:, :, ::-1] * 255.0).astype(
-                            numpy.uint8))
+                    objVideowriter.write_frame((tenFrames[0].clip(0.0, 1.0).numpy(force=True).transpose(1, 2, 0)[:, :, ::-1] * 255.0).astype(numpy.uint8))
+                    objVideowriter.write_frame((tenFrames[1].clip(0.0, 1.0).numpy(force=True).transpose(1, 2, 0)[:, :, ::-1] * 255.0).astype(numpy.uint8))
+                    objVideowriter.write_frame((tenFrames[2].clip(0.0, 1.0).numpy(force=True).transpose(1, 2, 0)[:, :, ::-1] * 255.0).astype(numpy.uint8))
+                    objVideowriter.write_frame((tenFrames[3].clip(0.0, 1.0).numpy(force=True).transpose(1, 2, 0)[:, :, ::-1] * 255.0).astype(numpy.uint8))
                 # end
 
-                tenFrames[0] = torch.FloatTensor(numpy.ascontiguousarray(
-                    npyFrame[:, :, ::-1].transpose(2, 0, 1).astype(numpy.float32) * (1.0 / 255.0)))
+                tenFrames[0] = torch.FloatTensor(numpy.ascontiguousarray(npyFrame[:, :, ::-1].transpose(2, 0, 1).astype(numpy.float32) * (1.0 / 255.0)))
             # end
         # end
 
