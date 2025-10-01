@@ -16,8 +16,11 @@ import torcheval.metrics
 import tqdm
 from tensorflow.python.ops.gen_summary_ops import summary_writer
 
+from typing import Any
+
 import dataset_triplet
 import softmax_basic
+import softsplat
 
 DATETIME = datetime.datetime.now()
 DATETIME_STR = DATETIME.strftime("%Y%m%d-%H%M%S")
@@ -38,6 +41,11 @@ def to_image(image: torch.Tensor, index: int = 0) -> PIL.Image.Image:
     return PIL.Image.fromarray(array.astype(np.uint8))
 
 
+def detect_constant_image(image: torch.Tensor) -> bool:
+    """Checks whether all values in a given array are equal."""
+    return image.max().item() == image.min().item()
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="train")
     parser.add_argument("-p", "--path", required=False, default="/home/tonifuentes/Pictures/archive/vimeo_triplet/")
@@ -50,6 +58,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("-r", "--learning_rate", type=float, default=1e-4)
     parser.add_argument("-C", "--checkpoint_period", type=int, default=1000)
     parser.add_argument("-V", "--validation_period", type=int, default=100)
+    parser.add_argument("-I", "--image_generation_period", type=int, default=1000)
     parser.add_argument("--validation_iterations", type=int, required=False, default=10)
     parser.add_argument("-d", "--disable_generate_files", action="store_true", default=None)
     return parser.parse_args()
@@ -97,7 +106,37 @@ def _validate(network: torch.nn.Module,
     return psnr / validation_iterations, validation_l1 / validation_iterations, validation_mse / validation_iterations
 
 
-def train(network: torch.nn.Module,
+def warp(network: softmax_basic.Model, images: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    ten_one = images[:, :, :, :, 0]
+    ten_two = images[:, :, :, :, 1]
+
+    with torch.set_grad_enabled(False):
+        ten_stats = [ten_one, ten_two]
+        ten_mean = sum([ten_in.mean([1, 2, 3], True) for ten_in in ten_stats]) / len(ten_stats)
+        ten_std = (sum(ten_in.std([1, 2, 3], unbiased=False, keepdim=True).square() + (ten_mean - ten_in.mean([1, 2, 3], True)).square()
+                       for ten_in in ten_stats) / len(ten_stats)).sqrt()
+        ten_one = ((ten_one - ten_mean) / (ten_std + 1e-7)).detach()
+        ten_two = ((ten_two - ten_mean) / (ten_std + 1e-7)).detach()
+
+    ten_forward, ten_backward = network.netFlow(ten_one, ten_two)
+    ten_enc_one = network.netSynthesis.netEncode(ten_one)
+    ten_enc_two = network.netSynthesis.netEncode(ten_two)
+
+    ten_metric_one = network.netSynthesis.netSoftmetric(ten_enc_one, ten_enc_two, ten_forward)
+    ten_metric_two = network.netSynthesis.netSoftmetric(ten_enc_two, ten_enc_one, ten_backward)
+
+    ten_forward = ten_forward * .5
+    ten_backward = ten_backward * .5
+
+    ten_warp1 = softsplat.softsplat(ten_one, ten_forward, ten_metric_one.neg().clip(-20, 20.0), "soft")
+    ten_warp2 = softsplat.softsplat(ten_two, ten_backward, ten_metric_two.neg().clip(-20, 20.0), "soft")
+    ten_warp1 = (ten_warp1 * ten_std) + ten_mean
+    ten_warp2 = (ten_warp2 * ten_std) + ten_mean
+
+    return ten_warp1, ten_warp2
+
+
+def train(network: softmax_basic.Model,
           dataset_folder_path: str,
           *,
           batch_size: int = 1,
@@ -139,8 +178,8 @@ def train(network: torch.nn.Module,
 
     summary_writer = tb.SummaryWriter(log_dir="logs/fit/" + DATETIME_STR)
     progress = rich.progress.Progress()
-    summary_writer.__enter__()
     progress.__enter__()
+    last_checkpoint: pathlib.Path | None = None
 
     try:
         for n_epoch in range(epochs):
@@ -157,6 +196,39 @@ def train(network: torch.nn.Module,
                 gt = preprocess(gt).cuda()
                 optimizer.zero_grad()
                 output = network(images)
+                batch_str = f"e{n_epoch:03d}b{n_batch:05d}"
+                ten_warp1, ten_warp2 = warp(network, images)
+
+                # restore to previous checkpoint if all values in the image are constant
+                if detect_constant_image(output):
+                    logger.warning(f"Detected corrupted image in {batch_str}")
+                    logger.info("Warping images...")
+                    ten_warp1, ten_warp2 = warp(network, images)
+
+                    # normalize generated tensors to improve resulting image quality
+                    # ten_warp1 = (ten_warp1 + 1) / 4
+                    # ten_warp2 = (ten_warp2 + 1) / 4
+
+                    # save generated images
+                    logger.info(f"saving image {save_path / f"{batch_str}_out.png"}")
+                    to_image(output).save(save_path / f"{batch_str}_out.png")
+                    logger.info(f"saving image {save_path / f"{batch_str}_gt.png"}")
+                    to_image(gt).save(save_path / f"{batch_str}_gt.png")
+                    path_w1 = save_path / f"{batch_str}_w1.png"
+                    path_w2 = save_path / f"{batch_str}_w2.png"
+                    logger.info(f"saving warped image {path_w1}")
+                    to_image(ten_warp1).save(path_w1)
+                    logger.info(f"saving warped image {path_w2}")
+                    to_image(ten_warp2).save(path_w2)
+
+                    if last_checkpoint is None:
+                        logger.error("Cannot restore to previous checkpoint. Resetting model...")
+                        network = softmax_basic.Model().cuda()
+                    else:
+                        logger.info(f"Restoring to checkpoint {last_checkpoint}")
+                        network.load_state_dict(torch.load(last_checkpoint))
+                    continue
+
                 loss = loss_function(output, gt)
                 loss.backward()
                 optimizer.step()
@@ -165,15 +237,15 @@ def train(network: torch.nn.Module,
                 summary_writer.add_scalar("Train/MSE", loss.item(), iteration_number)
                 summary_writer.add_scalar("Train/L1", l1_loss.item(), iteration_number)
                 restore_progress = False
-                batch_str = f"e{n_epoch:03d}b{n_batch:05d}"
 
                 # periodically save checkpoints
                 if checkpoint_save_period > 0 and not n_batch % checkpoint_save_period:
                     if verbose and not restore_progress:  # close progress bar if printing logger info to stderr
                         progress.__exit__(None, None, None)
                         restore_progress = True
-                    logger.info(f"saving checkpoint {checkpoint_path / batch_str}...")
-                    torch.save(network.state_dict(), checkpoint_path / batch_str)
+                    last_checkpoint = checkpoint_path / batch_str
+                    logger.info(f"saving checkpoint {last_checkpoint}...")
+                    torch.save(network.state_dict(), last_checkpoint)
 
                 # periodically save generated images
                 if image_save_period > 0 and not n_batch % image_save_period:
@@ -186,7 +258,7 @@ def train(network: torch.nn.Module,
                     to_image(gt).save(save_path / f"e{batch_str}_gt.png")
 
                 if validation_period > 0 and iteration_number and not n_batch % validation_period:
-                    if verbose and not restore_progress:
+                    if True or verbose and not restore_progress:
                         progress.__exit__(None, None, None)
                         restore_progress = True
                     psnr, validation_l1, validation_mse = _validate(network, validation_loader, validation_iterations, description=f"Batch {batch_str} validation")
@@ -205,12 +277,12 @@ def train(network: torch.nn.Module,
                 progress.refresh()
 
     except Exception as e:
-        summary_writer.__exit__(type(e), e, e.__traceback__)
         progress.__exit__(type(e), e, e.__traceback__)
         raise e
     else:
-        summary_writer.__exit__(None, None, None)
         progress.__exit__(None, None, None)
+    finally:
+        summary_writer.close()
 
 
 def test(network: torch.nn.Module,
@@ -259,6 +331,7 @@ def main():
             checkpoint_save_period=args.checkpoint_period,
             validation_period=args.validation_period,
             validation_iterations=args.validation_iterations,
+            image_save_period=args.image_generation_period,
             verbose=args.verbose
         )
 

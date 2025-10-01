@@ -712,6 +712,45 @@ netNetwork = None
 
 ##########################################################
 
+import numpy as np
+
+
+def to_image(image: torch.Tensor, index: int = 0) -> PIL.Image.Image:
+    array = image.clip(0.0, 1.0).permute((0, 2, 3, 1))[index].numpy(force=True) * 255.0
+    return PIL.Image.fromarray(array[:, :, ::-1].astype(np.uint8))
+
+
+def warp(network: Network, ten_one: torch.Tensor, ten_two: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    with torch.set_grad_enabled(False):
+        ten_stats = [ten_one, ten_two]
+        ten_mean = sum([ten_in.mean([1, 2, 3], True) for ten_in in ten_stats]) / len(ten_stats)
+        ten_std = (sum(ten_in.std([1, 2, 3], unbiased=False, keepdim=True).square() + (ten_mean - ten_in.mean([1, 2, 3], True)).square()
+                       for ten_in in ten_stats) / len(ten_stats)).sqrt()
+        ten_one = ((ten_one - ten_mean) / (ten_std + 1e-7)).detach()
+        ten_two = ((ten_two - ten_mean) / (ten_std + 1e-7)).detach()
+
+    obj_flow = network.netFlow(ten_one, ten_two)
+    ten_forward = obj_flow["tenForward"]
+    ten_backward = obj_flow["tenBackward"]
+    ten_enc_one = network.netSynthesis.netEncode(ten_one)
+    ten_enc_two = network.netSynthesis.netEncode(ten_two)
+
+    print(repr(ten_forward))
+
+    ten_metric_one = network.netSynthesis.netSoftmetric(ten_enc_one, ten_enc_two, ten_forward)
+    ten_metric_two = network.netSynthesis.netSoftmetric(ten_enc_two, ten_enc_one, ten_backward)
+
+    ten_forward = ten_forward * .5
+    ten_backward = ten_backward * .5
+
+    ten_warp1 = softsplat.softsplat(ten_one, ten_forward, ten_metric_one.neg().clip(-20, 20.0), "soft")
+    ten_warp2 = softsplat.softsplat(ten_two, ten_backward, ten_metric_two.neg().clip(-20, 20.0), "soft")
+    ten_warp1 = (ten_warp1 * ten_std) + ten_mean
+    ten_warp2 = (ten_warp2 * ten_std) + ten_mean
+
+    return ten_warp1, ten_warp2
+
+
 def estimate(tenOne, tenTwo, fltTimes):
     global netNetwork
 
@@ -735,6 +774,10 @@ def estimate(tenOne, tenTwo, fltTimes):
                                                  mode='replicate')
     tenPreprocessedTwo = torch.nn.functional.pad(input=tenPreprocessedTwo, pad=[0, intPadr, 0, intPadb],
                                                  mode='replicate')
+
+    w1, w2 = warp(netNetwork, tenPreprocessedOne, tenPreprocessedTwo)
+    to_image(w1).save("w1.png")
+    to_image(w2).save("w2.png")
 
     return [tenImage[0, :, :intHeight, :intWidth].cpu() for tenImage in
             netNetwork(tenPreprocessedOne, tenPreprocessedTwo, fltTimes)]
