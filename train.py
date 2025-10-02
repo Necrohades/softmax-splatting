@@ -161,7 +161,7 @@ def train(network: softmax_basic.Model,
     checkpoint_path: pathlib.Path | None = None
     if checkpoint_save_period:
         if checkpoint_dir is None:
-            checkpoint_dir = f"checkpoints/{DATETIME_STR}"
+            checkpoint_dir = f"checkpoints/synthesis/{DATETIME_STR}"
         pathlib.Path(checkpoint_dir).mkdir(parents=True, exist_ok=False)
         checkpoint_path = pathlib.Path(checkpoint_dir)
 
@@ -244,7 +244,7 @@ def train(network: softmax_basic.Model,
                         restore_progress = True
                     last_checkpoint = checkpoint_path / batch_str
                     logger.info(f"saving checkpoint {last_checkpoint}...")
-                    torch.save(network.state_dict(), last_checkpoint)
+                    torch.save(network.netSynthesis.state_dict(), last_checkpoint)
 
                 # periodically save generated images
                 if image_save_period > 0 and not n_batch % image_save_period:
@@ -318,7 +318,7 @@ def main():
 
     net = softmax_basic.Model().cuda()
     if args.state_dict is not None:
-        net.load_state_dict(torch.load(args.state_dict))
+        net.netSynthesis.load_state_dict(torch.load(args.state_dict))
 
     if args.test:
         test(net, args.path, batch_size=args.batch_size)
