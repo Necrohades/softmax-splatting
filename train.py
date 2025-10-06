@@ -7,6 +7,7 @@ import numpy as np
 import pathlib
 import PIL.Image
 import rich.progress
+import tifffile
 import torch
 import torch.nn
 import torch.autograd
@@ -182,7 +183,9 @@ def train(network: softmax_basic.Model,
 
     try:
         for n_epoch in range(epochs):
-            lr = n_epoch / (epochs - 1) if epochs > 1 else 0
+            # lr: moves linearly from initial_learning_rate to final_learning_rate
+            # lr = initial_learning_rate if there is only one overall epoch
+            lr = n_epoch / (epochs - 1) if epochs > 1 else 0  # lr \in [0, 1]
             lr = initial_learning_rate * (1 - lr) + final_learning_rate * lr
             progress.__exit__(None, None, None)
             optimizer = torch.optim.Adam(network.netSynthesis.parameters(), lr=lr)
@@ -196,37 +199,6 @@ def train(network: softmax_basic.Model,
                 optimizer.zero_grad()
                 output = network(images)
                 batch_str = f"e{n_epoch:03d}b{n_batch:05d}"
-                ten_warp1, ten_warp2 = warp(network, images)
-
-                # restore to previous checkpoint if all values in the image are constant
-                if detect_constant_image(output):
-                    logger.warning(f"Detected corrupted image in {batch_str}")
-                    logger.info("Warping images...")
-                    ten_warp1, ten_warp2 = warp(network, images)
-
-                    # normalize generated tensors to improve resulting image quality
-                    # ten_warp1 = (ten_warp1 + 1) / 4
-                    # ten_warp2 = (ten_warp2 + 1) / 4
-
-                    # save generated images
-                    logger.info(f"saving image {save_path / f"{batch_str}_out.png"}")
-                    to_image(output).save(save_path / f"{batch_str}_out.png")
-                    logger.info(f"saving image {save_path / f"{batch_str}_gt.png"}")
-                    to_image(gt).save(save_path / f"{batch_str}_gt.png")
-                    path_w1 = save_path / f"{batch_str}_w1.png"
-                    path_w2 = save_path / f"{batch_str}_w2.png"
-                    logger.info(f"saving warped image {path_w1}")
-                    to_image(ten_warp1).save(path_w1)
-                    logger.info(f"saving warped image {path_w2}")
-                    to_image(ten_warp2).save(path_w2)
-
-                    if last_checkpoint is None:
-                        logger.error("Cannot restore to previous checkpoint. Resetting model...")
-                        network = softmax_basic.Model().cuda()
-                    else:
-                        logger.info(f"Restoring to checkpoint {last_checkpoint}")
-                        network.load_state_dict(torch.load(last_checkpoint))
-                    continue
 
                 loss = loss_function(output, gt)
                 loss.backward()
@@ -251,16 +223,28 @@ def train(network: softmax_basic.Model,
                     if verbose and not restore_progress:  # close progress bar if printing logger info to stderr
                         progress.__exit__(None, None, None)
                         restore_progress = True
-                    logger.info(f"saving image {save_path / f"e{batch_str}_out.png"}...")
-                    to_image(output).save(save_path / f"e{batch_str}_out.png")
-                    logger.info(f"saving image {save_path / f"e{batch_str}_gt.png"}...")
-                    to_image(gt).save(save_path / f"e{batch_str}_gt.png")
+                    logger.info(f"saving image {save_path / f"{batch_str}_out.png"}...")
+                    to_image(output).save(save_path / f"{batch_str}_out.png")
+                    logger.info(f"saving image {save_path / f"{batch_str}_gt.png"}...")
+                    to_image(gt).save(save_path / f"{batch_str}_gt.png")
+
+                    logger.info("Warping images...")
+                    ten_warp1, ten_warp2 = warp(network, images)
+                    path_w1 = save_path / f"{batch_str}_w1.png"
+                    path_w2 = save_path / f"{batch_str}_w2.png"
+                    logger.info(f"saving warped image {path_w1}")
+                    tifffile.imwrite(path_w1, ten_warp1.numpy(force=True), photometric='rgb')
+                    # to_image(ten_warp1).save(path_w1)
+                    logger.info(f"saving warped image {path_w2}")
+                    tifffile.imwrite(path_w2, ten_warp2.numpy(force=True), photometric='rgb')
+                    # to_image(ten_warp2).save(path_w2)
 
                 if validation_period > 0 and iteration_number and not n_batch % validation_period:
                     if True or verbose and not restore_progress:
                         progress.__exit__(None, None, None)
                         restore_progress = True
-                    psnr, validation_l1, validation_mse = _validate(network, validation_loader, validation_iterations, description=f"Batch {batch_str} validation")
+                    psnr, validation_l1, validation_mse = _validate(network, validation_loader, validation_iterations,
+                                                                    description=f"Batch {batch_str} validation")
                     logger.info(f"{batch_str} validation results: PSNR - {psnr}, MSE - {validation_mse}; L1 - {validation_l1}")
                     summary_writer.add_scalar("Validation/PSNR", psnr, iteration_number)
                     summary_writer.add_scalar("Validation/MSE", validation_mse, iteration_number)
