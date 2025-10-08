@@ -3,5 +3,5 @@
   <component name="Black">
     <option name="sdkName" value="softmax" />
   </component>
-  <component name="ProjectRootManager" version="2" project-jdk-name="softmax" project-jdk-type="Python SDK" />
+  <component name="ProjectRootManager" version="2" project-jdk-name="$PROJECT_DIR$/../miniconda3" project-jdk-type="Python SDK" />
 </project>

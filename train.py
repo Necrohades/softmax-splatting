@@ -2,6 +2,7 @@ import argparse
 import datetime
 import logging
 import sys
+import typing
 
 import numpy as np
 import pathlib
@@ -18,6 +19,7 @@ import tqdm
 import dataset_triplet
 import softmax_basic
 import softsplat
+from util import flo, laplace
 
 DATETIME = datetime.datetime.now()
 DATETIME_STR = DATETIME.strftime("%Y%m%d-%H%M%S")
@@ -56,16 +58,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("-C", "--checkpoint_period", type=int, default=1000)
     parser.add_argument("-V", "--validation_period", type=int, default=100)
     parser.add_argument("-I", "--image_generation_period", type=int, default=1000)
-    parser.add_argument("--validation_iterations", type=int, required=False, default=10)
+    parser.add_argument("--validation_iterations", type=int, required=False, default=100)
     parser.add_argument("-d", "--disable_generate_files", action="store_true", default=None)
     return parser.parse_args()
 
 
 def _validate(network: torch.nn.Module,
               validation_loader: torch.utils.data.DataLoader,
+              loss_functions: typing.Sequence[typing.Callable],
               validation_iterations: int = None,
               *,
-              description: str = None) -> tuple[float, float, float]:
+              description: str = None) -> list[float]:
     """
     Perform a simple validation loop over the validation data loader.
     :param network: Model to be evaluated.
@@ -81,8 +84,7 @@ def _validate(network: torch.nn.Module,
 
     validation_iter = zip(range(validation_iterations), validation_loader)
 
-    validation_l1 = 0
-    validation_mse = 0
+    validations = [0] * len(loss_functions)
     psnr = 0
 
     with rich.progress.Progress() as progress:
@@ -92,21 +94,18 @@ def _validate(network: torch.nn.Module,
                 torch.cat([image.view(*image.shape, -1) for image in map(preprocess, images)], dim=4)).cuda()
             gt = preprocess(gt).cuda()
             output = network(images)
-            validation_l1 += torch.nn.functional.l1_loss(output, gt).item()
-            validation_mse += torch.nn.functional.mse_loss(output, gt).item()
+            for i, loss in enumerate(loss_functions):
+                validations[i] += loss(output, gt).item()
             metric = torcheval.metrics.PeakSignalNoiseRatio()
             metric.update(gt, output)
             psnr += metric.compute().item()
             if progress is not None:
                 progress.update(validation_task, advance=1)
 
-    return psnr / validation_iterations, validation_l1 / validation_iterations, validation_mse / validation_iterations
+    return [psnr / validation_iterations] + [v / validation_iterations for v in validations] # psnr / validation_iterations, validation_l1 / validation_iterations, validation_mse / validation_iterations, validation_lap / validation_iterations
 
 
-def warp(network: softmax_basic.Model, images: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-    ten_one = images[:, :, :, :, 0]
-    ten_two = images[:, :, :, :, 1]
-
+def warp(network: softmax_basic.Model, ten_one: torch.Tensor, ten_two: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     with torch.set_grad_enabled(False):
         ten_stats = [ten_one, ten_two]
         ten_mean = sum([ten_in.mean([1, 2, 3], True) for ten_in in ten_stats]) / len(ten_stats)
@@ -130,7 +129,7 @@ def warp(network: softmax_basic.Model, images: torch.Tensor) -> tuple[torch.Tens
     ten_warp1 = (ten_warp1 * ten_std) + ten_mean
     ten_warp2 = (ten_warp2 * ten_std) + ten_mean
 
-    return ten_warp1, ten_warp2
+    return ten_forward, ten_backward, ten_warp1, ten_warp2
 
 
 def train(network: softmax_basic.Model,
@@ -156,7 +155,8 @@ def train(network: softmax_basic.Model,
     train_loader = torch.utils.data.DataLoader(train_data, batch_size=batch_size, shuffle=True)
     validation_loader = torch.utils.data.DataLoader(validation_data, batch_size=batch_size, shuffle=True)
 
-    loss_function = torch.nn.MSELoss()
+    # loss_function = torch.nn.MSELoss()
+    loss_function = laplace.LaplacianLoss(device=torch.device('cuda'))
     iteration_number = 0  # counter for the number of training iterations so far
 
     checkpoint_path: pathlib.Path | None = None
@@ -175,8 +175,7 @@ def train(network: softmax_basic.Model,
 
     summary_writer = tb.SummaryWriter(log_dir="logs/fit/" + DATETIME_STR)
     progress = rich.progress.Progress()
-    progress.__enter__()
-    last_checkpoint: pathlib.Path | None = None
+    progress.start()
 
     for param in network.netFlow.parameters():
         param.requires_grad = False
@@ -191,7 +190,7 @@ def train(network: softmax_basic.Model,
             optimizer = torch.optim.Adam(network.netSynthesis.parameters(), lr=lr)
             logger.info(f"Epoch {n_epoch}. lr={lr}")
             progress = rich.progress.Progress()
-            progress.__enter__()
+            progress.start()
             epoch_task = progress.add_task(f"Epoch {n_epoch}/{epochs}", total=len(train_loader))
             for n_batch, (images, gt) in enumerate(train_loader):
                 images = torch.autograd.Variable(torch.cat([image.view(*image.shape, -1) for image in map(preprocess, images)], dim=4)).cuda()
@@ -203,10 +202,12 @@ def train(network: softmax_basic.Model,
                 loss = loss_function(output, gt)
                 loss.backward()
                 optimizer.step()
+                mse_loss = torch.nn.functional.mse_loss(output, gt)
                 l1_loss = torch.nn.functional.l1_loss(output, gt)
 
-                summary_writer.add_scalar("Train/MSE", loss.item(), iteration_number)
+                summary_writer.add_scalar("Train/MSE", mse_loss.item(), iteration_number)
                 summary_writer.add_scalar("Train/L1", l1_loss.item(), iteration_number)
+                summary_writer.add_scalar("Train/Laplacian", loss.item(), iteration_number)
                 restore_progress = False
 
                 # periodically save checkpoints
@@ -228,44 +229,63 @@ def train(network: softmax_basic.Model,
                     logger.info(f"saving image {save_path / f"{batch_str}_gt.png"}...")
                     to_image(gt).save(save_path / f"{batch_str}_gt.png")
 
+                    # save original input images
+                    ten_one = images[0:1, :, :, :, 0]
+                    ten_two = images[0:1, :, :, :, 1]
+                    path_input_1 = save_path / f"{batch_str}_in1.png"
+                    path_input_2 = save_path / f"{batch_str}_in2.png"
+                    logger.info(f"saving input image {path_input_1}")
+                    to_image(ten_one).save(path_input_1)
+                    logger.info(f"saving input image {path_input_2}")
+                    to_image(ten_two).save(path_input_2)
+
+                    # save warped images in .tiff and .png formats
                     logger.info("Warping images...")
-                    ten_warp1, ten_warp2 = warp(network, images)
-                    path_w1 = save_path / f"{batch_str}_w1.png"
-                    path_w2 = save_path / f"{batch_str}_w2.png"
-                    logger.info(f"saving warped image {path_w1}")
-                    tifffile.imwrite(path_w1, ten_warp1.numpy(force=True), photometric='rgb')
-                    # to_image(ten_warp1).save(path_w1)
-                    logger.info(f"saving warped image {path_w2}")
-                    tifffile.imwrite(path_w2, ten_warp2.numpy(force=True), photometric='rgb')
-                    # to_image(ten_warp2).save(path_w2)
+                    ten_forward, ten_backward, ten_warp1, ten_warp2 = warp(network, ten_one, ten_two)
+                    path_w1_tiff = save_path / f"{batch_str}_w1.tiff"
+                    path_w2_tiff = save_path / f"{batch_str}_w2.tiff"
+                    path_w1_png = save_path / f"{batch_str}_w1.png"
+                    path_w2_png = save_path / f"{batch_str}_w2.png"
+                    logger.info(f"saving warped image {path_w1_tiff}")
+                    tifffile.imwrite(path_w1_tiff, ten_warp1.numpy(force=True), photometric='rgb')
+                    logger.info(f"saving warped image {path_w2_tiff}")
+                    tifffile.imwrite(path_w2_tiff, ten_warp2.numpy(force=True), photometric='rgb')
+                    logger.info(f"saving warped image {path_w1_png}")
+                    to_image(ten_warp1).save(path_w1_png)
+                    logger.info(f"saving warped image {path_w2_png}")
+                    to_image(ten_warp2).save(path_w2_png)
+
+                    path_f1 = save_path / f"{batch_str}_f1.flo"
+                    path_f2 = save_path / f"{batch_str}_f2.flo"
+                    logger.info(f"saving forward flow {path_f1}")
+                    flo.save_flo(ten_forward.numpy(force=True), path_f1)
+                    logger.info(f"saving backward flow {path_f2}")
+                    flo.save_flo(ten_backward.numpy(force=True), path_f2)
 
                 if validation_period > 0 and iteration_number and not n_batch % validation_period:
                     if True or verbose and not restore_progress:
                         progress.__exit__(None, None, None)
                         restore_progress = True
-                    psnr, validation_l1, validation_mse = _validate(network, validation_loader, validation_iterations,
-                                                                    description=f"Batch {batch_str} validation")
+                    psnr, validation_l1, validation_mse, validation_lap = _validate(network, validation_loader, [torch.nn.functional.l1_loss, torch.nn.functional.mse_loss, loss_function], validation_iterations,
+                                                                                    description=f"Batch {batch_str} validation")
                     logger.info(f"{batch_str} validation results: PSNR - {psnr}, MSE - {validation_mse}; L1 - {validation_l1}")
                     summary_writer.add_scalar("Validation/PSNR", psnr, iteration_number)
                     summary_writer.add_scalar("Validation/MSE", validation_mse, iteration_number)
                     summary_writer.add_scalar("Validation/L1", validation_l1, iteration_number)
+                    summary_writer.add_scalar("Validation/Laplacian", validation_lap, iteration_number)
 
                 if restore_progress:
                     progress = rich.progress.Progress()
-                    progress.__enter__()
+                    progress.start()
                     epoch_task = progress.add_task(f"Epoch {n_epoch}/{epochs}", total=len(train_loader), completed=n_batch)
 
                 iteration_number += 1
                 progress.update(epoch_task, advance=1)
                 progress.refresh()
 
-    except Exception as e:
-        progress.__exit__(type(e), e, e.__traceback__)
-        raise e
-    else:
-        progress.__exit__(None, None, None)
     finally:
         summary_writer.close()
+        progress.stop()
 
 
 def test(network: torch.nn.Module,
@@ -303,6 +323,10 @@ def main():
     net = softmax_basic.Model().cuda()
     if args.state_dict is not None:
         net.netSynthesis.load_state_dict(torch.load(args.state_dict))
+    else:
+        # for param in net.netSynthesis.parameters():
+        #     torch.nn.init.constant_(param, 0)
+        net.netSynthesis = softmax_basic.Synthesis().cuda()
 
     if args.test:
         test(net, args.path, batch_size=args.batch_size)
