@@ -4,13 +4,26 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="4426216e-515f-406e-ab73-4fe0397377db" name="Changes" comment="Move to src/ directory">
+    <list default="true" id="4426216e-515f-406e-ab73-4fe0397377db" name="Changes" comment="Include vimeo dataset lists">
+      <change afterPath="$PROJECT_DIR$/run_model.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/util/flo.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/util/laplace.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/misc.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/train.py" beforeDir="false" afterPath="$PROJECT_DIR$/train.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/warp.py" beforeDir="false" afterPath="$PROJECT_DIR$/warp.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
     <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="FileTemplateManagerImpl">
+    <option name="RECENT_TEMPLATES">
+      <list>
+        <option value="Python Script" />
+      </list>
+    </option>
   </component>
   <component name="Git.Settings">
     <option name="RECENT_BRANCH_BY_REPOSITORY">
@@ -29,7 +42,7 @@
   <component name="GithubPullRequestsUISettings">{
   &quot;selectedUrlAndAccountId&quot;: {
     &quot;url&quot;: &quot;https://github.com/Necrohades/softmax-splatting.git&quot;,
-    &quot;accountId&quot;: &quot;39551264-a8e3-4e2b-bab7-343bbab0ee3d&quot;
+    &quot;accountId&quot;: &quot;1bea22c1-5c9c-4aa7-82df-ef295b68f289&quot;
   }
 }</component>
   <component name="ProjectColorInfo">{
@@ -58,14 +71,16 @@
 }</component>
   <component name="RecentsManager">
     <key name="MoveFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$/correlation" />
+      <recent name="$PROJECT_DIR$" />
       <recent name="$PROJECT_DIR$/src" />
     </key>
   </component>
   <component name="SharedIndexes">
     <attachedChunks>
       <set>
-        <option value="bundled-js-predefined-d6986cc7102b-b598e85cdad2-JavaScript-PY-252.25557.130" />
-        <option value="bundled-python-sdk-1bde30d8e611-7b97d883f26b-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-252.25557.130" />
+        <option value="bundled-js-predefined-d6986cc7102b-9c94529fcfe0-JavaScript-PY-252.26199.168" />
+        <option value="bundled-python-sdk-b3d66beaba9a-c6efb3732140-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-252.26199.168" />
       </set>
     </attachedChunks>
   </component>
@@ -81,19 +96,47 @@
       <workItem from="1758271535055" duration="16000" />
       <workItem from="1758271556413" duration="71000" />
       <workItem from="1759308321186" duration="51000" />
-      <workItem from="1759308391579" duration="6444000" />
-      <workItem from="1759429907258" duration="1216000" />
-      <workItem from="1760002398541" duration="673000" />
+      <workItem from="1759308391579" duration="5005000" />
+      <workItem from="1759396296270" duration="5265000" />
+      <workItem from="1759479263707" duration="3850000" />
+      <workItem from="1759737466363" duration="350000" />
+      <workItem from="1759738228953" duration="350000" />
+      <workItem from="1759738798772" duration="8340000" />
+      <workItem from="1759747473315" duration="14624000" />
     </task>
-    <task id="LOCAL-00001" summary="Move to src/ directory">
+    <task id="LOCAL-00001" summary="Save and load only netSynthesis to optimize space and move source code out of src/ directory">
       <option name="closed" value="true" />
-      <created>1759314148131</created>
+      <created>1759399541593</created>
       <option name="number" value="00001" />
       <option name="presentableId" value="LOCAL-00001" />
       <option name="project" value="LOCAL" />
-      <updated>1759314148131</updated>
+      <updated>1759399541593</updated>
     </task>
-    <option name="localTasksCounter" value="2" />
+    <task id="LOCAL-00002" summary="Add .gitignore">
+      <option name="closed" value="true" />
+      <created>1759399677583</created>
+      <option name="number" value="00002" />
+      <option name="presentableId" value="LOCAL-00002" />
+      <option name="project" value="LOCAL" />
+      <updated>1759399677583</updated>
+    </task>
+    <task id="LOCAL-00003" summary="Implement image checkpoint warping and remove corrupted image restoration for netSynthesis training">
+      <option name="closed" value="true" />
+      <created>1759740759422</created>
+      <option name="number" value="00003" />
+      <option name="presentableId" value="LOCAL-00003" />
+      <option name="project" value="LOCAL" />
+      <updated>1759740759422</updated>
+    </task>
+    <task id="LOCAL-00004" summary="Include vimeo dataset lists">
+      <option name="closed" value="true" />
+      <created>1759749542957</created>
+      <option name="number" value="00004" />
+      <option name="presentableId" value="LOCAL-00004" />
+      <option name="project" value="LOCAL" />
+      <updated>1759749542957</updated>
+    </task>
+    <option name="localTasksCounter" value="5" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -114,7 +157,10 @@
     <ignored-roots>
       <path value="$PROJECT_DIR$" />
     </ignored-roots>
-    <MESSAGE value="Move to src/ directory" />
-    <option name="LAST_COMMIT_MESSAGE" value="Move to src/ directory" />
+    <MESSAGE value="Save and load only netSynthesis to optimize space and move source code out of src/ directory" />
+    <MESSAGE value="Add .gitignore" />
+    <MESSAGE value="Implement image checkpoint warping and remove corrupted image restoration for netSynthesis training" />
+    <MESSAGE value="Include vimeo dataset lists" />
+    <option name="LAST_COMMIT_MESSAGE" value="Include vimeo dataset lists" />
   </component>
 </project>

@@ -4,7 +4,7 @@ import PIL.Image
 import torch
 from typing import Tuple
 
-import run
+import softmax_basic
 import softsplat
 
 
@@ -13,7 +13,7 @@ def to_image(image: torch.Tensor, index: int = 0) -> PIL.Image.Image:
     return PIL.Image.fromarray(array[:, :, ::-1].astype(numpy.uint8))
 
 
-def warp(network: run.Network, ten_one: torch.Tensor, ten_two: torch.Tensor, time: float = 0.5) -> Tuple[torch.Tensor, torch.Tensor]:
+def warp(network: softmax_basic.Model, ten_one: torch.Tensor, ten_two: torch.Tensor, time: float = 0.5) -> Tuple[torch.Tensor, torch.Tensor]:
     with torch.set_grad_enabled(False):
         ten_stats = [ten_one, ten_two]
         ten_mean = sum([ten_in.mean([1, 2, 3], True) for ten_in in ten_stats]) / len(ten_stats)
@@ -22,9 +22,10 @@ def warp(network: run.Network, ten_one: torch.Tensor, ten_two: torch.Tensor, tim
         ten_one = ((ten_one - ten_mean) / (ten_std + 1e-7)).detach()
         ten_two = ((ten_two - ten_mean) / (ten_std + 1e-7)).detach()
 
-    obj_flow = network.netFlow(ten_one, ten_two)
-    ten_forward = obj_flow["tenForward"]
-    ten_backward = obj_flow["tenBackward"]
+    # obj_flow = network.netFlow(ten_one, ten_two)
+    # ten_forward = obj_flow["tenForward"]
+    # ten_backward = obj_flow["tenBackward"]
+    ten_forward, ten_backward = network.netFlow(ten_one, ten_two)
     ten_enc_one = network.netSynthesis.netEncode(ten_one)
     ten_enc_two = network.netSynthesis.netEncode(ten_two)
 
