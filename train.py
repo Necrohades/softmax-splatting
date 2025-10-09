@@ -173,14 +173,10 @@ def train(network: softmax_basic.Model,
         pathlib.Path(save_dir).mkdir(parents=True, exist_ok=False)  # create save directory if it doesn't exist
         save_path = pathlib.Path(save_dir)
 
-    summary_writer = tb.SummaryWriter(log_dir="logs/fit/" + DATETIME_STR)
-    progress = rich.progress.Progress()
-    progress.start()
-
     for param in network.netFlow.parameters():
         param.requires_grad = False
 
-    try:
+    with tb.SummaryWriter(log_dir="logs/fit/" + DATETIME_STR) as summary_writer, rich.progress.Progress() as progress:
         for n_epoch in range(epochs):
             # lr: moves linearly from initial_learning_rate to final_learning_rate
             # lr = initial_learning_rate if there is only one overall epoch
@@ -188,7 +184,7 @@ def train(network: softmax_basic.Model,
             lr = initial_learning_rate * (1 - lr) + final_learning_rate * lr
             progress.__exit__(None, None, None)
             optimizer = torch.optim.Adam(network.netSynthesis.parameters(), lr=lr)
-            logger.info(f"Epoch {n_epoch}. lr={lr}")
+            progress.console.log(f"Epoch {n_epoch}. lr={lr}")
             progress = rich.progress.Progress()
             progress.start()
             epoch_task = progress.add_task(f"Epoch {n_epoch}/{epochs}", total=len(train_loader))
@@ -208,25 +204,18 @@ def train(network: softmax_basic.Model,
                 summary_writer.add_scalar("Train/MSE", mse_loss.item(), iteration_number)
                 summary_writer.add_scalar("Train/L1", l1_loss.item(), iteration_number)
                 summary_writer.add_scalar("Train/Laplacian", loss.item(), iteration_number)
-                restore_progress = False
 
                 # periodically save checkpoints
                 if checkpoint_save_period > 0 and not n_batch % checkpoint_save_period:
-                    if verbose and not restore_progress:  # close progress bar if printing logger info to stderr
-                        progress.__exit__(None, None, None)
-                        restore_progress = True
                     last_checkpoint = checkpoint_path / batch_str
-                    logger.info(f"saving checkpoint {last_checkpoint}...")
+                    progress.console.log(f"saving checkpoint {last_checkpoint}...")
                     torch.save(network.netSynthesis.state_dict(), last_checkpoint)
 
                 # periodically save generated images
                 if image_save_period > 0 and not n_batch % image_save_period:
-                    if verbose and not restore_progress:  # close progress bar if printing logger info to stderr
-                        progress.__exit__(None, None, None)
-                        restore_progress = True
                     logger.info(f"saving image {save_path / f"{batch_str}_out.png"}...")
                     to_image(output).save(save_path / f"{batch_str}_out.png")
-                    logger.info(f"saving image {save_path / f"{batch_str}_gt.png"}...")
+                    progress.console.log(f"saving image {save_path / f"{batch_str}_gt.png"}...")
                     to_image(gt).save(save_path / f"{batch_str}_gt.png")
 
                     # save original input images
@@ -234,58 +223,46 @@ def train(network: softmax_basic.Model,
                     ten_two = images[0:1, :, :, :, 1]
                     path_input_1 = save_path / f"{batch_str}_in1.png"
                     path_input_2 = save_path / f"{batch_str}_in2.png"
-                    logger.info(f"saving input image {path_input_1}")
+                    progress.console.log(f"saving input image {path_input_1}")
                     to_image(ten_one).save(path_input_1)
-                    logger.info(f"saving input image {path_input_2}")
+                    progress.console.log(f"saving input image {path_input_2}")
                     to_image(ten_two).save(path_input_2)
 
                     # save warped images in .tiff and .png formats
-                    logger.info("Warping images...")
+                    progress.console.log("Warping images...")
                     ten_forward, ten_backward, ten_warp1, ten_warp2 = warp(network, ten_one, ten_two)
                     path_w1_tiff = save_path / f"{batch_str}_w1.tiff"
                     path_w2_tiff = save_path / f"{batch_str}_w2.tiff"
                     path_w1_png = save_path / f"{batch_str}_w1.png"
                     path_w2_png = save_path / f"{batch_str}_w2.png"
-                    logger.info(f"saving warped image {path_w1_tiff}")
+                    progress.console.log(f"saving warped image {path_w1_tiff}")
                     tifffile.imwrite(path_w1_tiff, ten_warp1.numpy(force=True), photometric='rgb')
-                    logger.info(f"saving warped image {path_w2_tiff}")
+                    progress.console.log(f"saving warped image {path_w2_tiff}")
                     tifffile.imwrite(path_w2_tiff, ten_warp2.numpy(force=True), photometric='rgb')
-                    logger.info(f"saving warped image {path_w1_png}")
+                    progress.console.log(f"saving warped image {path_w1_png}")
                     to_image(ten_warp1).save(path_w1_png)
-                    logger.info(f"saving warped image {path_w2_png}")
+                    progress.console.log(f"saving warped image {path_w2_png}")
                     to_image(ten_warp2).save(path_w2_png)
 
                     path_f1 = save_path / f"{batch_str}_f1.flo"
                     path_f2 = save_path / f"{batch_str}_f2.flo"
-                    logger.info(f"saving forward flow {path_f1}")
+                    progress.console.log(f"saving forward flow {path_f1}")
                     flo.save_flo(ten_forward.numpy(force=True), path_f1)
-                    logger.info(f"saving backward flow {path_f2}")
+                    progress.console.log(f"saving backward flow {path_f2}")
                     flo.save_flo(ten_backward.numpy(force=True), path_f2)
 
                 if validation_period > 0 and iteration_number and not n_batch % validation_period:
-                    if True or verbose and not restore_progress:
-                        progress.__exit__(None, None, None)
-                        restore_progress = True
                     psnr, validation_l1, validation_mse, validation_lap = _validate(network, validation_loader, [torch.nn.functional.l1_loss, torch.nn.functional.mse_loss, loss_function], validation_iterations,
                                                                                     description=f"Batch {batch_str} validation")
-                    logger.info(f"{batch_str} validation results: PSNR - {psnr}, MSE - {validation_mse}; L1 - {validation_l1}")
+                    progress.console.log(f"{batch_str} validation results: PSNR - {psnr}, MSE - {validation_mse}; L1 - {validation_l1}")
                     summary_writer.add_scalar("Validation/PSNR", psnr, iteration_number)
                     summary_writer.add_scalar("Validation/MSE", validation_mse, iteration_number)
                     summary_writer.add_scalar("Validation/L1", validation_l1, iteration_number)
                     summary_writer.add_scalar("Validation/Laplacian", validation_lap, iteration_number)
 
-                if restore_progress:
-                    progress = rich.progress.Progress()
-                    progress.start()
-                    epoch_task = progress.add_task(f"Epoch {n_epoch}/{epochs}", total=len(train_loader), completed=n_batch)
-
                 iteration_number += 1
                 progress.update(epoch_task, advance=1)
                 progress.refresh()
-
-    finally:
-        summary_writer.close()
-        progress.stop()
 
 
 def test(network: torch.nn.Module,
