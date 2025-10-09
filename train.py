@@ -68,7 +68,8 @@ def _validate(network: torch.nn.Module,
               loss_functions: typing.Sequence[typing.Callable],
               validation_iterations: int = None,
               *,
-              description: str = None) -> list[float]:
+              description: str = None,
+              progress: rich.progress.Progress) -> list[float]:
     """
     Perform a simple validation loop over the validation data loader.
     :param network: Model to be evaluated.
@@ -87,20 +88,19 @@ def _validate(network: torch.nn.Module,
     validations = [0] * len(loss_functions)
     psnr = 0
 
-    with rich.progress.Progress() as progress:
-        validation_task = progress.add_task(description, total=validation_iterations)
-        for _, (images, gt) in validation_iter:
-            images = torch.autograd.Variable(
-                torch.cat([image.view(*image.shape, -1) for image in map(preprocess, images)], dim=4)).cuda()
-            gt = preprocess(gt).cuda()
-            output = network(images)
-            for i, loss in enumerate(loss_functions):
-                validations[i] += loss(output, gt).item()
-            metric = torcheval.metrics.PeakSignalNoiseRatio()
-            metric.update(gt, output)
-            psnr += metric.compute().item()
-            if progress is not None:
-                progress.update(validation_task, advance=1)
+    validation_task = progress.add_task(description, total=validation_iterations)
+    for _, (images, gt) in validation_iter:
+        images = torch.autograd.Variable(
+            torch.cat([image.view(*image.shape, -1) for image in map(preprocess, images)], dim=4)).cuda()
+        gt = preprocess(gt).cuda()
+        output = network(images)
+        for i, loss in enumerate(loss_functions):
+            validations[i] += loss(output, gt).item()
+        metric = torcheval.metrics.PeakSignalNoiseRatio()
+        metric.update(gt, output)
+        psnr += metric.compute().item()
+        if progress is not None:
+            progress.update(validation_task, advance=1)
 
     return [psnr / validation_iterations] + [v / validation_iterations for v in validations] # psnr / validation_iterations, validation_l1 / validation_iterations, validation_mse / validation_iterations, validation_lap / validation_iterations
 
@@ -182,11 +182,8 @@ def train(network: softmax_basic.Model,
             # lr = initial_learning_rate if there is only one overall epoch
             lr = n_epoch / (epochs - 1) if epochs > 1 else 0  # lr \in [0, 1]
             lr = initial_learning_rate * (1 - lr) + final_learning_rate * lr
-            progress.__exit__(None, None, None)
             optimizer = torch.optim.Adam(network.netSynthesis.parameters(), lr=lr)
             progress.console.log(f"Epoch {n_epoch}. lr={lr}")
-            progress = rich.progress.Progress()
-            progress.start()
             epoch_task = progress.add_task(f"Epoch {n_epoch}/{epochs}", total=len(train_loader))
             for n_batch, (images, gt) in enumerate(train_loader):
                 images = torch.autograd.Variable(torch.cat([image.view(*image.shape, -1) for image in map(preprocess, images)], dim=4)).cuda()
