@@ -4,22 +4,8 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="4426216e-515f-406e-ab73-4fe0397377db" name="Changes" comment="">
-      <change beforePath="$PROJECT_DIR$/.idea/misc.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
+    <list default="true" id="4426216e-515f-406e-ab73-4fe0397377db" name="Changes" comment="Move to src/ directory">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/benchmark_middlebury.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/benchmark_middlebury.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/benchmark_xiph.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/benchmark_xiph.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/correlation/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/src/correlation/README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/correlation/correlation.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/correlation/correlation.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/dataset_triplet.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/dataset_triplet.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/main.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/run.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/run.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/softmax_basic.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/softmax_basic.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/softsplat.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/softsplat.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tensorboard_test.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/tensorboard_test.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/train.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/train.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/training.ipynb" beforeDir="false" afterPath="$PROJECT_DIR$/training.ipynb" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/warp.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/warp.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -95,8 +81,19 @@
       <workItem from="1758271535055" duration="16000" />
       <workItem from="1758271556413" duration="71000" />
       <workItem from="1759308321186" duration="51000" />
-      <workItem from="1759308391579" duration="5005000" />
+      <workItem from="1759308391579" duration="6444000" />
+      <workItem from="1759429907258" duration="1216000" />
+      <workItem from="1760002398541" duration="673000" />
     </task>
+    <task id="LOCAL-00001" summary="Move to src/ directory">
+      <option name="closed" value="true" />
+      <created>1759314148131</created>
+      <option name="number" value="00001" />
+      <option name="presentableId" value="LOCAL-00001" />
+      <option name="project" value="LOCAL" />
+      <updated>1759314148131</updated>
+    </task>
+    <option name="localTasksCounter" value="2" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -117,5 +114,7 @@
     <ignored-roots>
       <path value="$PROJECT_DIR$" />
     </ignored-roots>
+    <MESSAGE value="Move to src/ directory" />
+    <option name="LAST_COMMIT_MESSAGE" value="Move to src/ directory" />
   </component>
 </project>
