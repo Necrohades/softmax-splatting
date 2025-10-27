@@ -2,7 +2,6 @@
 
 import glob
 import numpy
-import PIL
 import PIL.Image
 import skimage
 import skimage.metrics

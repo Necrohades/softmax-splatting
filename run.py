@@ -1,20 +1,18 @@
 #!/usr/bin/env python
 
 import getopt
-import math
 import numpy
 import PIL
 import PIL.Image
 import sys
 import torch
-import typing
 
 import softsplat # the custom softmax splatting layer
 
 try:
-    from .correlation import correlation # the custom cost volume layer
+    from correlation import correlation # the custom cost volume layer
 except:
-    sys.path.insert(0, './correlation'); import correlation # you should consider upgrading python
+    sys.path.insert(0, 'src/correlation'); import correlation # you should consider upgrading python
 # end
 
 ##########################################################
@@ -435,7 +433,8 @@ class Synthesis(torch.nn.Module):
                         tenBackward = torch.nn.functional.interpolate(input=tenBackward, size=(tenEnctwo[intLevel].shape[2], tenEnctwo[intLevel].shape[3]), mode='bilinear', align_corners=False) * (float(tenEnctwo[intLevel].shape[3]) / float(tenBackward.shape[3]))
                     # end
 
-                    tenWarpedOne.append(softsplat.softsplat(tenIn=torch.cat([tenEncone[intLevel], tenMetricone], 1), tenFlow=tenForward, tenMetric=tenMetricone.neg().clip(-20.0, 20.0), strMode='soft'))
+                    tenWarpedOne.append(
+                        softsplat.softsplat(tenIn=torch.cat([tenEncone[intLevel], tenMetricone], 1), tenFlow=tenForward, tenMetric=tenMetricone.neg().clip(-20.0, 20.0), strMode='soft'))
                     tenWarpedTwo.append(softsplat.softsplat(tenIn=torch.cat([tenEnctwo[intLevel], tenMetrictwo], 1), tenFlow=tenBackward, tenMetric=tenMetrictwo.neg().clip(-20.0, 20.0), strMode='soft'))
 
                     tenOutput.append([self.netOne, self.netTwo, self.netThr][intLevel](torch.cat([tenWarpedOne[-1], tenWarpedTwo[-1]], 1)))
