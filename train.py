@@ -22,7 +22,7 @@ import softsplat
 from util import flo, laplace
 
 DATETIME = datetime.datetime.now()
-DATETIME_STR = DATETIME.strftime("%Y%m%d-%H%M%S")
+DATETIME_STR = DATETIME.strftime("%Y-%m-%d_%H-%M-%S")
 
 
 def preprocess(image: torch.Tensor) -> torch.Tensor:
@@ -55,10 +55,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("-t", "--test", action="store_true")
     parser.add_argument("-s", "--state_dict", type=str, required=False, help="load state dict in folder location")
     parser.add_argument("-r", "--learning_rate", type=float, default=1e-4)
-    parser.add_argument("-C", "--checkpoint_period", type=int, default=1000)
-    parser.add_argument("-V", "--validation_period", type=int, default=100)
+    parser.add_argument("-C", "--checkpoint_period", type=int, default=10000)
+    parser.add_argument("-V", "--validation_period", type=int, default=1000)
     parser.add_argument("-I", "--image_generation_period", type=int, default=1000)
-    parser.add_argument("--validation_iterations", type=int, required=False, default=100)
+    parser.add_argument("--validation_iterations", type=int, required=False)
     parser.add_argument("-d", "--disable_generate_files", action="store_true", default=None)
     return parser.parse_args()
 
@@ -101,6 +101,7 @@ def _validate(network: torch.nn.Module,
         psnr += metric.compute().item()
         if progress is not None:
             progress.update(validation_task, advance=1)
+    progress.remove_task(validation_task)
 
     return [psnr / validation_iterations] + [v / validation_iterations for v in validations] # psnr / validation_iterations, validation_l1 / validation_iterations, validation_mse / validation_iterations, validation_lap / validation_iterations
 
@@ -144,8 +145,10 @@ def train(network: softmax_basic.Model,
           image_save_period: int = 1000,
           save_dir: str = None,
           validation_period: int = 0,
-          validation_iterations: int = 10,
+          validation_iterations: int = None,
           verbose: bool = False) -> None:
+
+    print("Number of parameters:", sum((__import__('math').prod(param.shape) for param in network.netFlow.parameters())))
 
     logger = logging.getLogger(__name__)
     logger.info(f"Starting train iteration. Number of epochs: {epochs}")
@@ -159,31 +162,35 @@ def train(network: softmax_basic.Model,
     loss_function = laplace.LaplacianLoss(device=torch.device('cuda'))
     iteration_number = 0  # counter for the number of training iterations so far
 
+    if save_dir is None:
+        pathlib.Path("saves").mkdir(exist_ok=True)
+        save_dir = pathlib.Path(f"saves/{DATETIME_STR}")
+    save_dir.mkdir(exist_ok=False)
+
     checkpoint_path: pathlib.Path | None = None
     if checkpoint_save_period:
         if checkpoint_dir is None:
-            checkpoint_dir = f"checkpoints/synthesis/{DATETIME_STR}"
+            checkpoint_dir = f"saves/{DATETIME_STR}/checkpoints/synthesis/"
         pathlib.Path(checkpoint_dir).mkdir(parents=True, exist_ok=False)
         checkpoint_path = pathlib.Path(checkpoint_dir)
 
-    save_path: pathlib.Path | None = None
+    image_save_path: pathlib.Path | None = None
     if image_save_period:
-        if save_dir is None:
-            save_dir = f"images/{DATETIME_STR}"  # default image save location
-        pathlib.Path(save_dir).mkdir(parents=True, exist_ok=False)  # create save directory if it doesn't exist
-        save_path = pathlib.Path(save_dir)
+        image_save_dir = f"saves/{DATETIME_STR}/images/"  # default image save location
+        pathlib.Path(image_save_dir).mkdir(parents=True, exist_ok=False)  # create save directory if it doesn't exist
+        image_save_path = pathlib.Path(image_save_dir)
 
     for param in network.netFlow.parameters():
         param.requires_grad = False
 
-    with tb.SummaryWriter(log_dir="logs/fit/" + DATETIME_STR) as summary_writer, rich.progress.Progress() as progress:
+    optimizer = torch.optim.Adamax(network.netSynthesis.parameters(), lr=initial_learning_rate)
+    scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, .9)
+
+    with tb.SummaryWriter(log_dir=f"saves/{DATETIME_STR}/logs/fit/") as summary_writer, rich.progress.Progress() as progress:
         for n_epoch in range(epochs):
             # lr: moves linearly from initial_learning_rate to final_learning_rate
             # lr = initial_learning_rate if there is only one overall epoch
-            lr = n_epoch / (epochs - 1) if epochs > 1 else 0  # lr \in [0, 1]
-            lr = initial_learning_rate * (1 - lr) + final_learning_rate * lr
-            optimizer = torch.optim.Adam(network.netSynthesis.parameters(), lr=lr)
-            progress.console.log(f"Epoch {n_epoch}. lr={lr}")
+            progress.console.log(f"Epoch {n_epoch}. lr={scheduler.get_lr()}")
             epoch_task = progress.add_task(f"Epoch {n_epoch}/{epochs}", total=len(train_loader))
             for n_batch, (images, gt) in enumerate(train_loader):
                 images = torch.autograd.Variable(torch.cat([image.view(*image.shape, -1) for image in map(preprocess, images)], dim=4)).cuda()
@@ -210,16 +217,16 @@ def train(network: softmax_basic.Model,
 
                 # periodically save generated images
                 if image_save_period > 0 and not n_batch % image_save_period:
-                    logger.info(f"saving image {save_path / f"{batch_str}_out.png"}...")
-                    to_image(output).save(save_path / f"{batch_str}_out.png")
-                    progress.console.log(f"saving image {save_path / f"{batch_str}_gt.png"}...")
-                    to_image(gt).save(save_path / f"{batch_str}_gt.png")
+                    progress.console.log(f"saving image {image_save_path / f'{batch_str}_out.png'}...")
+                    to_image(output).save(image_save_path / f"{batch_str}_out.png")
+                    progress.console.log(f"saving image {image_save_path / f'{batch_str}_gt.png'}...")
+                    to_image(gt).save(image_save_path / f"{batch_str}_gt.png")
 
                     # save original input images
                     ten_one = images[0:1, :, :, :, 0]
                     ten_two = images[0:1, :, :, :, 1]
-                    path_input_1 = save_path / f"{batch_str}_in1.png"
-                    path_input_2 = save_path / f"{batch_str}_in2.png"
+                    path_input_1 = image_save_path / f"{batch_str}_in1.png"
+                    path_input_2 = image_save_path / f"{batch_str}_in2.png"
                     progress.console.log(f"saving input image {path_input_1}")
                     to_image(ten_one).save(path_input_1)
                     progress.console.log(f"saving input image {path_input_2}")
@@ -228,10 +235,10 @@ def train(network: softmax_basic.Model,
                     # save warped images in .tiff and .png formats
                     progress.console.log("Warping images...")
                     ten_forward, ten_backward, ten_warp1, ten_warp2 = warp(network, ten_one, ten_two)
-                    path_w1_tiff = save_path / f"{batch_str}_w1.tiff"
-                    path_w2_tiff = save_path / f"{batch_str}_w2.tiff"
-                    path_w1_png = save_path / f"{batch_str}_w1.png"
-                    path_w2_png = save_path / f"{batch_str}_w2.png"
+                    path_w1_tiff = image_save_path / f"{batch_str}_w1.tiff"
+                    path_w2_tiff = image_save_path / f"{batch_str}_w2.tiff"
+                    path_w1_png = image_save_path / f"{batch_str}_w1.png"
+                    path_w2_png = image_save_path / f"{batch_str}_w2.png"
                     progress.console.log(f"saving warped image {path_w1_tiff}")
                     tifffile.imwrite(path_w1_tiff, ten_warp1.numpy(force=True), photometric='rgb')
                     progress.console.log(f"saving warped image {path_w2_tiff}")
@@ -241,8 +248,8 @@ def train(network: softmax_basic.Model,
                     progress.console.log(f"saving warped image {path_w2_png}")
                     to_image(ten_warp2).save(path_w2_png)
 
-                    path_f1 = save_path / f"{batch_str}_f1.flo"
-                    path_f2 = save_path / f"{batch_str}_f2.flo"
+                    path_f1 = image_save_path / f"{batch_str}_f1.flo"
+                    path_f2 = image_save_path / f"{batch_str}_f2.flo"
                     progress.console.log(f"saving forward flow {path_f1}")
                     flo.save_flo(ten_forward.numpy(force=True), path_f1)
                     progress.console.log(f"saving backward flow {path_f2}")
@@ -250,7 +257,7 @@ def train(network: softmax_basic.Model,
 
                 if validation_period > 0 and iteration_number and not n_batch % validation_period:
                     psnr, validation_l1, validation_mse, validation_lap = _validate(network, validation_loader, [torch.nn.functional.l1_loss, torch.nn.functional.mse_loss, loss_function], validation_iterations,
-                                                                                    description=f"Batch {batch_str} validation")
+                                                                                    description=f"Batch {batch_str} validation", progress=progress)
                     progress.console.log(f"{batch_str} validation results: PSNR - {psnr}, MSE - {validation_mse}; L1 - {validation_l1}")
                     summary_writer.add_scalar("Validation/PSNR", psnr, iteration_number)
                     summary_writer.add_scalar("Validation/MSE", validation_mse, iteration_number)
@@ -260,6 +267,7 @@ def train(network: softmax_basic.Model,
                 iteration_number += 1
                 progress.update(epoch_task, advance=1)
                 progress.refresh()
+            scheduler.step()
 
 
 def test(network: torch.nn.Module,
