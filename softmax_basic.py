@@ -17,9 +17,9 @@ import sys
 import softsplat # the custom softmax splatting layer
 
 try:
-    from .correlation import correlation # the custom cost volume layer
+    from correlation import correlation # the custom cost volume layer
 except:
-    sys.path.insert(0, './correlation'); import correlation # you should consider upgrading python
+    sys.path.insert(0, 'src/correlation'); import correlation # you should consider upgrading python
 # end
 
 FORWARD = 0
@@ -587,12 +587,12 @@ class Model(torch.nn.Module):
             tenStd = (sum([tenIn.std([1, 2, 3], False, True).square() + (tenMean - tenIn.mean([1, 2, 3], True)).square() for tenIn in tenStats]) / len(tenStats)).sqrt()
             tenOne = ((tenOne - tenMean) / (tenStd + 0.0000001)).detach()
             tenTwo = ((tenTwo - tenMean) / (tenStd + 0.0000001)).detach()
-        # end
+            # end
 
-        # tenOne = tenOne.view(*tenOne.shape[:-1])
-        # tenTwo = tenTwo.view(*tenTwo.shape[:-1])
+            # tenOne = tenOne.view(*tenOne.shape[:-1])
+            # tenTwo = tenTwo.view(*tenTwo.shape[:-1])
 
-        objFlow = self.netFlow(tenOne, tenTwo)
+            objFlow = self.netFlow(tenOne, tenTwo)
 
         tenImages = [self.netSynthesis(tenOne, tenTwo, objFlow[FORWARD], objFlow[BACKWARD], fltTime) for fltTime in fltTimes]
 
