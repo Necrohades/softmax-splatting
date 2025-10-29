@@ -210,9 +210,9 @@ def train(network: softmax_basic.Model,
                     # ten_warp2 = (ten_warp2 + 1) / 4
 
                     # save generated images
-                    logger.info(f"saving image {save_path / f"{batch_str}_out.png"}")
+                    logger.info(f"saving image {save_path / f'{batch_str}_out.png'}")
                     to_image(output).save(save_path / f"{batch_str}_out.png")
-                    logger.info(f"saving image {save_path / f"{batch_str}_gt.png"}")
+                    logger.info(f"saving image {save_path / f'{batch_str}_gt.png'}")
                     to_image(gt).save(save_path / f"{batch_str}_gt.png")
                     path_w1 = save_path / f"{batch_str}_w1.png"
                     path_w2 = save_path / f"{batch_str}_w2.png"
@@ -252,9 +252,9 @@ def train(network: softmax_basic.Model,
                     if verbose and not restore_progress:  # close progress bar if printing logger info to stderr
                         progress.__exit__(None, None, None)
                         restore_progress = True
-                    logger.info(f"saving image {save_path / f"e{batch_str}_out.png"}...")
+                    logger.info(f"saving image {save_path / f'e{batch_str}_out.png'}...")
                     to_image(output).save(save_path / f"e{batch_str}_out.png")
-                    logger.info(f"saving image {save_path / f"e{batch_str}_gt.png"}...")
+                    logger.info(f"saving image {save_path / f'e{batch_str}_gt.png'}...")
                     to_image(gt).save(save_path / f"e{batch_str}_gt.png")
 
                 if validation_period > 0 and iteration_number and not n_batch % validation_period:
