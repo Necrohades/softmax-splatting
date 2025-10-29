@@ -16,7 +16,7 @@ import torcheval.metrics
 import tqdm
 from tensorflow.python.ops.gen_summary_ops import summary_writer
 
-from typing import Any
+from typing import Any, Tuple
 
 import dataset_triplet
 import softmax_basic
@@ -68,7 +68,7 @@ def _validate(network: torch.nn.Module,
               validation_loader: torch.utils.data.DataLoader,
               validation_iterations: int = None,
               *,
-              description: str = None) -> tuple[float, float, float]:
+              description: str = None) -> Tuple[float, float, float]:
     """
     Perform a simple validation loop over the validation data loader.
     :param network: Model to be evaluated.
@@ -106,7 +106,7 @@ def _validate(network: torch.nn.Module,
     return psnr / validation_iterations, validation_l1 / validation_iterations, validation_mse / validation_iterations
 
 
-def warp(network: softmax_basic.Model, images: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+def warp(network: softmax_basic.Model, images: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
     ten_one = images[:, :, :, :, 0]
     ten_two = images[:, :, :, :, 1]
 

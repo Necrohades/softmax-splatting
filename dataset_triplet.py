@@ -5,6 +5,7 @@ from pathlib import Path
 from skimage import io
 import numpy as np
 import torch
+from typing import Tuple, List
 
 import logging
 log = logging.getLogger(__name__)
@@ -46,7 +47,7 @@ class Dataset(data.Dataset):
             
         log.info(f"Number of sequences available: {len(self.sequences)}")
 
-    def __getitem__(self, index) -> tuple[list[torch.Tensor], torch.Tensor]:
+    def __getitem__(self, index) -> Tuple[List[torch.Tensor], torch.Tensor]:
         
         # Get the sequence directory
         sequence_dir = self.sequences[index]
