@@ -592,7 +592,7 @@ class Model(torch.nn.Module):
             # tenOne = tenOne.view(*tenOne.shape[:-1])
             # tenTwo = tenTwo.view(*tenTwo.shape[:-1])
 
-            objFlow = self.netFlow(tenOne, tenTwo)
+        objFlow = self.netFlow(tenOne, tenTwo)
 
         tenImages = [self.netSynthesis(tenOne, tenTwo, objFlow[FORWARD], objFlow[BACKWARD], fltTime) for fltTime in fltTimes]
 
